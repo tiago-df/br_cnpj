@@ -3,7 +3,7 @@
 Reads:
   data/intermediate/step_01_estab_<dump_date>.parquet
   data/intermediate/step_01_empresas_<dump_date>.parquet
-  data/input/<dump_date>/Cnaes.zip  (and other lookup zips)
+  data/input/<dump_date>/csv/*.csv  (lookup zips extracted by zip_utils)
   app/cnae_osm_map.yaml             (CNAE → OSM tag mapping)
 
 Writes:
@@ -29,6 +29,7 @@ from app.schema import (
     PAIS_COLUMNS,
     QUALIFICACAO_COLUMNS,
 )
+from app.utils.zip_utils import extract_zips
 
 log = logging.getLogger(__name__)
 
@@ -48,13 +49,14 @@ def _read_csv_expr(paths: list[str], columns: list[str], encoding: str, delim: s
 def _load_lookup(con: duckdb.DuckDBPyConnection, versioned_dir: Path,
                  pattern: str, table: str, columns: list[str],
                  encoding: str, delim: str, required: bool = True) -> bool:
-    paths = sorted(versioned_dir.glob(pattern))
-    if not paths:
+    zip_paths = sorted(versioned_dir.glob(pattern))
+    if not zip_paths:
         if required:
             raise FileNotFoundError(f"Required lookup not found: {pattern} in {versioned_dir}")
         log.warning("Optional lookup not found, skipping: %s", pattern)
         return False
-    sql = _read_csv_expr([str(p) for p in paths], columns, encoding, delim)
+    csv_paths = extract_zips(zip_paths, versioned_dir)
+    sql = _read_csv_expr(csv_paths, columns, encoding, delim)
     con.execute(f"CREATE OR REPLACE VIEW {table} AS SELECT * FROM {sql}")
     n = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
     log.debug("Loaded lookup %s: %s rows", table, f"{n:,}")
@@ -85,7 +87,7 @@ def run(
     enc   = cfg["file"]["encoding"]
     delim = cfg["file"]["delimiter"]
     mem   = cfg["duckdb"]["memory_limit"]
-    threads = cfg["duckdb"]["threads"]  # 0 = DuckDB default (all cores)
+    threads     = cfg["duckdb"]["threads"]
     compression = cfg["output"]["parquet_compression"]
     row_group   = cfg["output"]["parquet_row_group_size"]
 
@@ -127,15 +129,15 @@ def run(
     con.execute(f"CREATE VIEW estab    AS SELECT * FROM '{estab_path}'")
     con.execute(f"CREATE VIEW empresas AS SELECT * FROM '{empresas_path}'")
 
-    _load_lookup(con, versioned_dir, "Cnaes.zip",    "lu_cnae",      CNAE_COLUMNS,      enc, delim)
-    _load_lookup(con, versioned_dir, "Naturezas.zip", "lu_natureza", NATUREZA_COLUMNS,  enc, delim)
-    _load_lookup(con, versioned_dir, "Municipios.zip","lu_municipio", MUNICIPIO_COLUMNS, enc, delim)
+    # Lookups: extract zip → read CSV
+    _load_lookup(con, versioned_dir, "Cnaes.zip",     "lu_cnae",      CNAE_COLUMNS,      enc, delim)
+    _load_lookup(con, versioned_dir, "Naturezas.zip",  "lu_natureza",  NATUREZA_COLUMNS,  enc, delim)
+    _load_lookup(con, versioned_dir, "Municipios.zip", "lu_municipio", MUNICIPIO_COLUMNS, enc, delim)
 
-    # Optional lookups
     for pat, tbl, cols in [
-        ("Motivos.zip",       "lu_motivo",       MOTIVO_COLUMNS),
-        ("Paises.zip",        "lu_pais",          PAIS_COLUMNS),
-        ("Qualificacoes.zip", "lu_qualificacao",  QUALIFICACAO_COLUMNS),
+        ("Motivos.zip",       "lu_motivo",      MOTIVO_COLUMNS),
+        ("Paises.zip",        "lu_pais",        PAIS_COLUMNS),
+        ("Qualificacoes.zip", "lu_qualificacao", QUALIFICACAO_COLUMNS),
     ]:
         _load_lookup(con, versioned_dir, pat, tbl, cols, enc, delim, required=False)
 
