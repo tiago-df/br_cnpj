@@ -173,24 +173,31 @@ def run(
     if dry_run:
         return dump_date, versioned_dir
 
-    def _download(f: dict) -> tuple[str, bool]:
+    def _download(f: dict) -> tuple[str, bool, bool]:
+        """Returns (name, ok, skipped_404)."""
         dest = versioned_dir / f["name"]
         if not force and is_valid_zip(dest):
             log.info("  ✓ %s already complete, skipping", f["name"])
-            return f["name"], True
-        download_file(session, f["url"], dest, chunk, resume=resume and not force)
+            return f["name"], True, False
+        try:
+            download_file(session, f["url"], dest, chunk, resume=resume and not force)
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                log.warning("  ⚠ %s not found on server (404) — skipping", f["name"])
+                return f["name"], True, True  # treat as non-fatal
+            raise
         ok = is_valid_zip(dest)
         if ok:
             log.info("  ✓ %s", f["name"])
         else:
             log.error("  ✗ %s — ZIP integrity check failed", f["name"])
-        return f["name"], ok
+        return f["name"], ok, False
 
     failed = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_download, f): f for f in files}
         for future in as_completed(futures):
-            name, ok = future.result()
+            name, ok, skipped = future.result()
             if not ok:
                 failed.append(name)
 
