@@ -1,13 +1,14 @@
 """Step 3 — Export the joined POI Parquet to the requested output formats.
 
-Reads:
-  data/intermediate/step_02_poi_joined_<dump_date>.parquet
+Reads (in priority order):
+  data/intermediate/step_04_geocoded_<dump_date>.parquet   (with lat/lon, preferred)
+  data/intermediate/step_02_poi_joined_<dump_date>.parquet (fallback, no coordinates)
 
 Writes (to data/output/<dump_date>/):
   poi.parquet
   poi.csv.gz
   poi.jsonl
-  poi.geojson   (null geometry — coordinates added in the geocoding phase)
+  poi.geojson   (Point geometry when lat/lon available; null geometry otherwise)
 
 Each format is written only if the output file does not already exist,
 unless --force is set.
@@ -50,16 +51,24 @@ def write_jsonl(con: duckdb.DuckDBPyConnection, out: Path) -> Path:
 
 
 def write_geojson(con: duckdb.DuckDBPyConnection, out: Path) -> Path:
-    """GeoJSON with null geometry — placeholder until geocoding phase."""
+    """GeoJSON — Point geometry when lat/lon are available, null otherwise."""
     rows = con.execute("SELECT * FROM poi").fetchdf()
-    features = [
-        {
-            "type": "Feature",
-            "geometry": None,
-            "properties": rec,
-        }
-        for rec in rows.to_dict(orient="records")
-    ]
+    has_coords = "lat" in rows.columns and "lon" in rows.columns
+
+    features = []
+    for rec in rows.to_dict(orient="records"):
+        lat = rec.pop("lat", None) if has_coords else None
+        lon = rec.pop("lon", None) if has_coords else None
+        try:
+            geometry = (
+                {"type": "Point", "coordinates": [float(lon), float(lat)]}
+                if (lat is not None and lon is not None)
+                else None
+            )
+        except (TypeError, ValueError):
+            geometry = None
+        features.append({"type": "Feature", "geometry": geometry, "properties": rec})
+
     fc = {"type": "FeatureCollection", "features": features}
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(fc, fh, ensure_ascii=False, default=str)
@@ -80,12 +89,22 @@ def run(
     dump_date: str,
     formats: list[str],
     force: bool = False,
+    source_parquet: Path | None = None,
 ) -> list[Path]:
-    """Export joined POI to requested formats. Returns list of written paths."""
-    joined_path = intermediate_dir / f"step_02_poi_joined_{dump_date}.parquet"
+    """Export POI Parquet to requested formats. Returns list of written paths.
+
+    source_parquet: explicit path override (e.g. step_04_geocoded_*.parquet).
+                    Defaults to step_02_poi_joined_*.parquet if not provided.
+    """
+    if source_parquet is not None:
+        joined_path = source_parquet
+        log.info("  Source: %s", joined_path.name)
+    else:
+        joined_path = intermediate_dir / f"step_02_poi_joined_{dump_date}.parquet"
+
     if not joined_path.exists():
         raise FileNotFoundError(
-            f"Missing Step 2 output: {joined_path}. Run step 2 first (or use --from-step join)."
+            f"Missing source Parquet: {joined_path}. Run upstream steps first."
         )
 
     cfg = get_config()

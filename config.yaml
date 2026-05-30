@@ -34,3 +34,19 @@ output:
 file:
   encoding: "windows-1252-2000"   # ICU name accepted by DuckDB (RF files are Windows-1252)
   delimiter: ";"
+
+geocoding:
+  # Phase A — BrasilAPI CEP lookup (https://brasilapi.com.br)
+  # Free, no auth. Results cached to data/cache/cep_brasilapi.parquet.
+  cep_workers: 20                 # concurrent async HTTP requests to BrasilAPI
+
+  # Phase B — City-centre detection via geobr municipality centroids
+  # A POI geocoded from CEP is flagged "municipio_centroid" (low precision)
+  # if it falls within this radius of the municipality centroid.
+  city_center_threshold_m: 500    # metres
+
+  # Phase C — TomTom Structured Geocode API fallback
+  # Requires TOMTOM_API_KEY set in .env. Results cached per dump date.
+  # Set tomtom_enabled: false to skip this phase entirely.
+  tomtom_enabled: true
+  tomtom_workers: 10              # concurrent async requests to TomTom API

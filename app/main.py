@@ -6,7 +6,8 @@ Steps:
   0  download   Download raw dump zips from Receita Federal (auto-detects latest)
   1  filter     Filter raw zips → intermediate Parquet (step_01_*)
   2  join       Join + enrich intermediates → joined Parquet (step_02_*)
-  3  export     Export joined Parquet → final output formats (step_03_*)
+  3  geocode    Geocode POIs: BrasilAPI CEP + TomTom fallback (step_04_*)
+  4  export     Export final Parquet → output formats (step_03_*)
 
 Usage examples:
   python -m app.main                             # full run, auto-detect latest dump
@@ -25,11 +26,11 @@ import logging
 import sys
 import time
 
-from app import download, step_01_filter, step_02_join, step_03_export
+from app import download, step_01_filter, step_02_join, step_03_export, step_04_geocode
 from app.config_loader import resolve_path
 from app.utils.logging_utils import setup_logging
 
-STEP_ORDER = ["download", "filter", "join", "export"]
+STEP_ORDER = ["download", "filter", "join", "geocode", "export"]
 FORMATS    = list(step_03_export.WRITERS.keys())
 
 
@@ -83,6 +84,7 @@ def main():
 
     input_dir        = resolve_path("input_dir")
     intermediate_dir = resolve_path("intermediate_dir")
+    cache_dir        = resolve_path("cache_dir")
     output_dir       = resolve_path("output_dir")
 
     dump_date = args.dump_date  # may be None — download step will resolve it
@@ -139,20 +141,32 @@ def main():
 
         # ── Count mode ────────────────────────────────────────────────────
         if args.count:
-            import duckdb
+            import duckdb as _duckdb
             joined = intermediate_dir / f"step_02_poi_joined_{dump_date}.parquet"
-            n = duckdb.execute(f"SELECT count(*) FROM '{joined}'").fetchone()[0]
+            n = _duckdb.execute(f"SELECT count(*) FROM '{joined}'").fetchone()[0]
             log.info("POI count: %s", f"{n:,}")
             return
 
-        # ── Step 3: Export ────────────────────────────────────────────────
+        # ── Step 3: Geocode ───────────────────────────────────────────────
+        if start_idx <= STEP_ORDER.index("geocode"):
+            step_04_geocode.run(
+                intermediate_dir=intermediate_dir,
+                cache_dir=cache_dir,
+                dump_date=dump_date,
+                force=args.force,
+            )
+
+        # ── Step 4: Export ────────────────────────────────────────────────
         if start_idx <= STEP_ORDER.index("export"):
+            # Prefer geocoded output; fall back to joined if geocode was skipped
+            geocoded = intermediate_dir / f"step_04_geocoded_{dump_date}.parquet"
             step_03_export.run(
                 intermediate_dir=intermediate_dir,
                 output_dir=output_dir,
                 dump_date=dump_date,
                 formats=args.format,
                 force=args.force,
+                source_parquet=geocoded if geocoded.exists() else None,
             )
 
     except FileNotFoundError as exc:

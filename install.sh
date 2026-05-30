@@ -55,6 +55,13 @@ else
     echo "[3/4] Virtual environment already exists — skipping."
 fi
 
+# geopandas (used in Step 4 geocoding) requires GDAL system libraries
+if command -v apt-get &>/dev/null; then
+    echo "      Installing GDAL system libraries (required by geopandas)…"
+    sudo apt-get install -y -q libgdal-dev python3-gdal gdal-bin 2>/dev/null || \
+        echo "      WARNING: Could not install GDAL — geopandas may fail. Install manually."
+fi
+
 "$VENV/bin/pip" install --upgrade pip --quiet
 "$VENV/bin/pip" install -r "$INSTALL_DIR/requirements.txt" --quiet
 echo "      Dependencies installed."
