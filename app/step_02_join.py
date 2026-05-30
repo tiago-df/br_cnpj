@@ -85,7 +85,7 @@ def run(
     enc   = cfg["file"]["encoding"]
     delim = cfg["file"]["delimiter"]
     mem   = cfg["duckdb"]["memory_limit"]
-    threads = cfg["duckdb"]["threads"] or None
+    threads = cfg["duckdb"]["threads"]  # 0 = DuckDB default (all cores)
     compression = cfg["output"]["parquet_compression"]
     row_group   = cfg["output"]["parquet_row_group_size"]
 
@@ -98,7 +98,10 @@ def run(
                 f"Missing Step 1 output: {p}. Run step 1 first (or use --from-step filter)."
             )
 
-    con = duckdb.connect(":memory:", config={"threads": threads, "memory_limit": mem})
+    db_cfg = {"memory_limit": mem}
+    if threads:
+        db_cfg["threads"] = threads
+    con = duckdb.connect(":memory:", config=db_cfg)
 
     # ── Load OSM category map ─────────────────────────────────────────────
     osm_map_path = Path(__file__).parent / "cnae_osm_map.yaml"

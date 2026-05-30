@@ -70,7 +70,7 @@ def run(
     enc  = cfg["file"]["encoding"]
     delim = cfg["file"]["delimiter"]
     mem  = cfg["duckdb"]["memory_limit"]
-    threads = cfg["duckdb"]["threads"] or None
+    threads = cfg["duckdb"]["threads"]  # 0 = DuckDB default (all cores)
     compression = cfg["output"]["parquet_compression"]
     row_group   = cfg["output"]["parquet_row_group_size"]
 
@@ -79,7 +79,10 @@ def run(
     excluir_porte_mei    = filters["excluir_porte_mei"]
     excluir_natureza_mei = filters["excluir_natureza_mei"]
 
-    con = duckdb.connect(":memory:", config={"threads": threads, "memory_limit": mem})
+    db_cfg = {"memory_limit": mem}
+    if threads:
+        db_cfg["threads"] = threads
+    con = duckdb.connect(":memory:", config=db_cfg)
 
     versioned_dir = raw_dir / dump_date
 

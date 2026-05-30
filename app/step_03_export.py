@@ -90,10 +90,13 @@ def run(
 
     cfg = get_config()
     mem     = cfg["duckdb"]["memory_limit"]
-    threads = cfg["duckdb"]["threads"] or None
+    threads = cfg["duckdb"]["threads"]  # 0 = DuckDB default (all cores)
 
     out_dir = _versioned_out_dir(output_dir, dump_date)
-    con = duckdb.connect(":memory:", config={"threads": threads, "memory_limit": mem})
+    db_cfg = {"memory_limit": mem}
+    if threads:
+        db_cfg["threads"] = threads
+    con = duckdb.connect(":memory:", config=db_cfg)
     con.execute(f"CREATE VIEW poi AS SELECT * FROM '{joined_path}'")
 
     t0 = time.perf_counter()
