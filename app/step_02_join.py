@@ -38,11 +38,11 @@ JOINED_OUT = "step_02_poi_joined_{date}.parquet"
 
 def _read_csv_expr(paths: list[str], columns: list[str], encoding: str, delim: str) -> str:
     path_list = ", ".join(f"'{p}'" for p in paths)
-    col_names = ", ".join(f"'{c}'" for c in columns)
+    col_struct = "{" + ", ".join(f"'{c}': 'VARCHAR'" for c in columns) + "}"
     return (
         f"read_csv([{path_list}], "
         f"auto_detect=false, header=false, sep='{delim}', encoding='{encoding}', "
-        f"column_names=[{col_names}], all_varchar=true, ignore_errors=true)"
+        f"columns={col_struct}, ignore_errors=true)"
     )
 
 
