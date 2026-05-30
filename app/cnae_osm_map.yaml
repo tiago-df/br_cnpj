@@ -1,0 +1,576 @@
+# CNAE → OSM Tag Mapping
+# Keys  : 7-digit CNAE subclass code as stored in Receita Federal data (no formatting)
+# Values: OSM tag in key=value format  (wiki.openstreetmap.org/wiki/Map_features)
+#
+# Format example: CNAE 4731-8/00 is stored as "4731800"
+# Unmapped codes → osm_category = null in the output
+
+# ════════════════════════════════════════════════════════════════════════════
+# AMENITY
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── Combustíveis ──────────────────────────────────────────────────────────
+"4731800": "amenity=fuel"        # Comércio varejista de combustíveis para veículos automotores
+
+# ── Alimentação e Bebidas ─────────────────────────────────────────────────
+"5611201": "amenity=restaurant"  # Restaurantes e similares
+"5611203": "amenity=restaurant"  # Lanchonetes, casas de chá, de sucos e similares (sit-down)
+"5611204": "amenity=bar"         # Bares e outros estabelecimentos especializados em bebidas
+"5611205": "amenity=bar"         # Bares e outros estabelecimentos com entretenimento ao vivo
+"5611202": "amenity=fast_food"   # Serviços de alimentação para eventos e recepções - bufê (não se aplica bem, mas placeholder)
+"5612100": "amenity=fast_food"   # Serviços ambulantes de alimentação
+"5620101": "amenity=fast_food"   # Fornecimento de alimentos preparados preponderantemente para empresas
+"5620102": "amenity=fast_food"   # Serviços de alimentação em self-service
+"5620103": "amenity=fast_food"   # Fornecimento de alimentos preparados preponderantemente para consumo domiciliar
+
+# ── Bancos e Finanças ─────────────────────────────────────────────────────
+"6422100": "amenity=bank"        # Bancos múltiplos, com carteira comercial
+"6423200": "amenity=bank"        # Caixas econômicas
+"6424701": "amenity=bank"        # Bancos cooperativos
+"6424702": "amenity=bank"        # Cooperativas centrais de crédito
+"6424703": "amenity=bank"        # Cooperativas de crédito mútuo
+"6424704": "amenity=bank"        # Cooperativas de crédito rural
+"6431000": "amenity=bank"        # Bancos múltiplos, sem carteira comercial
+"6432800": "amenity=bank"        # Bancos de investimento
+"6433600": "amenity=bank"        # Bancos de desenvolvimento
+"6434400": "amenity=bank"        # Agências de fomento
+"6435201": "amenity=bank"        # Sociedades de crédito imobiliário
+"6435202": "amenity=bank"        # Associações de poupança e empréstimo
+"6435203": "amenity=bank"        # Companhias hipotecárias
+"6436100": "amenity=bank"        # Sociedades de crédito, financiamento e investimento - financeiras
+"6437900": "amenity=bank"        # Sociedades de crédito ao microempreendedor
+"6438701": "amenity=bank"        # Bancos de câmbio
+"6450600": "amenity=bank"        # Sociedades de capitalização
+"6461100": "amenity=bank"        # Holdings de instituições financeiras
+"6472000": "amenity=bank"        # Fundos de investimento
+"6491300": "amenity=bank"        # Sociedades de fomento mercantil - factoring
+"6499901": "amenity=bank"        # Clubes de investimento
+"6499905": "amenity=atm"         # Correspondentes bancários (proximidade de ATM)
+"6499906": "amenity=bureau_de_change" # Casas de câmbio
+
+# ── Farmácias ─────────────────────────────────────────────────────────────
+"4771701": "amenity=pharmacy"    # Comércio varejista de produtos farmacêuticos, sem manipulação
+"4771702": "amenity=pharmacy"    # Comércio varejista de produtos farmacêuticos, com manipulação
+"4771703": "amenity=pharmacy"    # Comércio varejista de produtos farmacêuticos homeopáticos
+"4771704": "amenity=pharmacy"    # Comércio varejista de medicamentos veterinários
+
+# ── Hospitais ─────────────────────────────────────────────────────────────
+"8610101": "amenity=hospital"    # Atividades de atendimento hospitalar, exceto pronto-socorro e clínicas
+"8610102": "amenity=hospital"    # Atividades de atendimento em pronto-socorro e unidades hospitalares de emergência
+"8621601": "amenity=hospital"    # UTI móvel
+"8621602": "amenity=hospital"    # Serviços móveis de atendimento a urgências
+
+# ── Clínicas e Saúde ─────────────────────────────────────────────────────
+"8630501": "amenity=clinic"      # Atividade médica ambulatorial com recursos para realização de exames complementares
+"8630502": "amenity=clinic"      # Atividade médica ambulatorial sem recursos para realização de exames complementares
+"8630503": "amenity=clinic"      # Atividade médica ambulatorial restrita a consultas
+"8630504": "amenity=clinic"      # Atividade odontológica (clínica geral)
+"8630505": "amenity=dentist"     # Atividade odontológica especializada
+"8630506": "amenity=dentist"     # Serviços de prótese dentária
+"8630507": "amenity=clinic"      # Atividades de enfermagem
+"8630508": "amenity=clinic"      # Serviços de vacinação e imunização humana
+"8630599": "amenity=clinic"      # Outras atividades de atenção ambulatorial não especificadas
+"8640201": "amenity=clinic"      # Laboratórios de anatomia patológica e citológica
+"8640202": "amenity=clinic"      # Laboratórios clínicos
+"8640203": "amenity=clinic"      # Serviços de diálise e nefrologia
+"8640204": "amenity=clinic"      # Serviços de tomografia
+"8640205": "amenity=clinic"      # Serviços de diagnóstico por imagem com uso de radiação ionizante, exceto tomografia
+"8640206": "amenity=clinic"      # Serviços de ressonância magnética
+"8640207": "amenity=clinic"      # Serviços de diagnóstico por imagem sem uso de radiação ionizante
+"8640208": "amenity=clinic"      # Serviços de diagnóstico por registro gráfico - ECG, EEG e outros
+"8640209": "amenity=clinic"      # Serviços de diagnóstico por métodos ópticos - endoscopia e outros
+"8640210": "amenity=clinic"      # Serviços de quimioterapia
+"8640211": "amenity=clinic"      # Serviços de radioterapia
+"8640212": "amenity=clinic"      # Serviços de hemoterapia
+"8640213": "amenity=clinic"      # Serviços de litotripsia
+"8640214": "amenity=clinic"      # Serviços de bancos de células e tecidos humanos
+"8640299": "amenity=clinic"      # Atividades de serviços de complementação diagnóstica não especificadas
+"8650001": "healthcare=physiotherapist" # Atividades de fisioterapia
+"8650002": "healthcare=occupational_therapist" # Atividades de terapia ocupacional
+"8650003": "healthcare=speech_therapist" # Atividades de fonoaudiologia
+"8650004": "healthcare=optometrist"  # Atividades de podologia
+"8650005": "healthcare=psychologist" # Atividades de psicologia e psicanálise
+"8650006": "healthcare=nutritionist" # Atividades de nutricionistas
+"8650007": "healthcare=midwife"      # Atividades de parteiras
+"8650008": "healthcare=nurse"        # Atividades de enfermagem
+"8650009": "healthcare=optometrist"  # Atividades de homeopatia
+"8650099": "healthcare=alternative"  # Outras atividades de atenção à saúde humana
+"8660700": "amenity=nursing_home"    # Atividades de apoio à gestão de saúde
+
+# ── Veterinária ───────────────────────────────────────────────────────────
+"7500100": "amenity=veterinary"  # Atividades veterinárias
+
+# ── Correios ──────────────────────────────────────────────────────────────
+"5310501": "amenity=post_office" # Atividades de franquia postal
+"5310502": "amenity=post_office" # Atividades de malotes
+"5320202": "amenity=post_office" # Serviços de entrega rápida
+
+# ── Segurança Pública ─────────────────────────────────────────────────────
+"8424200": "amenity=police"      # Segurança e ordem pública
+"8425100": "amenity=fire_station" # Defesa civil
+
+# ── Cultura ───────────────────────────────────────────────────────────────
+"9101501": "amenity=library"     # Atividades de bibliotecas e arquivos
+"9101502": "amenity=museum"      # Atividades de museus e de exploração de lugares e prédios históricos
+"9102301": "amenity=museum"      # Atividades de jardins botânicos, zoológicos, parques nacionais, reservas ecológicas
+"9102302": "amenity=zoo"         # Zoológicos
+"5914600": "amenity=cinema"      # Atividades de exibição cinematográfica
+"9001901": "amenity=theatre"     # Produção teatral
+"9001902": "amenity=theatre"     # Produção musical
+"9001903": "amenity=theatre"     # Produção de óperas, concertos, danças
+"9001904": "amenity=arts_centre" # Produção de espetáculos de rodeios, vaquejadas
+"9001905": "amenity=arts_centre" # Produção de espetáculos de dança
+"9001906": "amenity=arts_centre" # Atividades de sonorização e de iluminação
+"9001999": "amenity=arts_centre" # Demais atividades de artes cênicas
+"9003500": "amenity=arts_centre" # Gestão de espaços para artes cênicas
+
+# ── Estacionamento ────────────────────────────────────────────────────────
+"5223100": "amenity=parking"     # Estacionamento de veículos
+"5229001": "amenity=parking"     # Serviços de apoio ao transporte por táxi
+
+# ── Lavagem de Veículos ───────────────────────────────────────────────────
+"4520006": "amenity=car_wash"    # Serviços de borracharia para veículos automotores
+"4520007": "amenity=car_wash"    # Serviços de instalação, manutenção e reparação de acessórios para veículos
+# (car wash more specifically below in shop section)
+
+# ── Casas de Câmbio ───────────────────────────────────────────────────────
+"6499906": "amenity=bureau_de_change"
+
+# ── Igreja / Culto ────────────────────────────────────────────────────────
+"9491000": "amenity=place_of_worship" # Atividades de organizações religiosas
+"9492800": "amenity=place_of_worship" # Atividades de organizações políticas (não é POI de culto mas para não perder)
+
+# ── Cemitérios / Funerárias ───────────────────────────────────────────────
+"9603301": "amenity=funeral_hall" # Atividades funerárias e serviços relacionados
+"9603302": "amenity=funeral_hall" # Serviços de cremação
+"9603303": "amenity=cemetery"     # Planos ou convênio funerários
+"9603304": "amenity=funeral_hall" # Serviços de funerárias
+"9603399": "amenity=funeral_hall" # Atividades funerárias e serviços relacionados NE
+
+# ── Lavanderia ────────────────────────────────────────────────────────────
+"9601701": "amenity=laundry"     # Lavanderias
+"9601702": "amenity=laundry"     # Tinturarias
+"9601703": "amenity=laundry"     # Toalheiros
+
+# ── Jogos / Apostas ───────────────────────────────────────────────────────
+"9200301": "amenity=casino"      # Casas de bingo
+"9200302": "amenity=casino"      # Exploração de apostas em corridas de cavalos
+"9200399": "amenity=gambling"    # Exploração de jogos de azar e apostas NE
+
+# ════════════════════════════════════════════════════════════════════════════
+# SHOP
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── Supermercados e Hipermercados ─────────────────────────────────────────
+"4711301": "shop=supermarket"    # Comércio varejista de mercadorias em geral com predominância alimentícia - hipermercados
+"4711302": "shop=supermarket"    # Comércio varejista - supermercados
+"4711303": "shop=supermarket"    # Comércio varejista - supermercados com serviços adicionais
+
+# ── Minimercados / Mercearias ─────────────────────────────────────────────
+"4712100": "shop=convenience"    # Minimercados, mercearias e armazéns
+"4729699": "shop=convenience"    # Comércio varejista de produtos alimentícios em geral
+
+# ── Padarias ─────────────────────────────────────────────────────────────
+"4721101": "shop=bakery"         # Padaria e confeitaria com predominância de produção própria
+"4721102": "shop=bakery"         # Padaria e confeitaria com predominância de revenda
+"4721103": "shop=bakery"         # Padaria e confeitaria com produção própria e consumo no local
+"4637103": "shop=bakery"         # Comércio atacadista de pães, biscoitos, bolo e massas
+
+# ── Açougue / Peixaria ────────────────────────────────────────────────────
+"4722901": "shop=butcher"        # Açougue
+"4722902": "shop=seafood"        # Peixaria
+
+# ── Bebidas ───────────────────────────────────────────────────────────────
+"4723700": "shop=beverages"      # Comércio varejista de bebidas
+
+# ── Hortifruti / Verduras ─────────────────────────────────────────────────
+"4724500": "shop=greengrocer"    # Comércio varejista de hortifrutigranjeiros
+
+# ── Laticínios / Ovos ─────────────────────────────────────────────────────
+"4725200": "shop=dairy"          # Comércio varejista de laticínios e frios
+
+# ── Doces / Confeitaria ───────────────────────────────────────────────────
+"4729601": "shop=confectionery"  # Tabacaria
+"4729602": "shop=confectionery"  # Comércio varejista de mercadorias em lojas de conveniência
+"4729603": "shop=confectionery"  # Comércio varejista de doces, balas, bombons e semelhantes
+"4729604": "shop=health_food"    # Comércio varejista de produtos naturais
+
+# ── Tintas e Materiais de Construção ─────────────────────────────────────
+"4741500": "shop=paint"          # Comércio varejista de tintas e materiais para pintura
+"4742300": "shop=hardware"       # Comércio varejista de material elétrico
+"4743100": "shop=glaziery"       # Comércio varejista de vidros
+"4744001": "shop=hardware"       # Comércio varejista de ferragens e ferramentas
+"4744002": "shop=hardware"       # Comércio varejista de madeira e artefatos
+"4744003": "shop=hardware"       # Comércio varejista de materiais hidráulicos
+"4744004": "shop=hardware"       # Comércio varejista de cal, areia, pedra britada, tijolos
+"4744005": "shop=hardware"       # Comércio varejista de materiais de construção não especificados
+"4744006": "shop=hardware"       # Comércio varejista de pedras para revestimento
+"4744099": "shop=hardware"       # Comércio varejista de materiais de construção em geral
+"4789001": "shop=hardware"       # Comércio varejista de suvenires, bijuterias e artesanatos
+
+# ── Informática e Eletrônicos ─────────────────────────────────────────────
+"4751201": "shop=computer"       # Comércio varejista especializado de equipamentos e suprimentos de informática
+"4751202": "shop=computer"       # Recarga de cartuchos para equipamentos de informática
+"4752100": "shop=electronics"    # Comércio varejista especializado de equipamentos de telefonia
+"4753900": "shop=electronics"    # Comércio varejista especializado de eletrodomésticos e equipamentos de áudio e vídeo
+"4754701": "shop=furniture"      # Comércio varejista de móveis
+"4754702": "shop=furniture"      # Comércio varejista de artigos de colchoaria
+"4754703": "shop=furniture"      # Comércio varejista de artigos de iluminação
+
+# ── Artigos para Casa ─────────────────────────────────────────────────────
+"4755501": "shop=houseware"      # Comércio varejista de tecidos
+"4755502": "shop=houseware"      # Comércio varejista de artigos de armarinho
+"4755503": "shop=houseware"      # Comércio varejista de artigos de cama, mesa e banho
+"4756300": "shop=houseware"      # Comércio varejista especializado de instrumentos musicais e acessórios
+"4757100": "shop=houseware"      # Comércio varejista especializado de peças e acessórios para aparelhos eletroeletrônicos
+"4759801": "shop=houseware"      # Comércio varejista de artigos de tapeçaria, cortinas e persianas
+"4759899": "shop=houseware"      # Comércio varejista de outros artigos de uso doméstico não especificados
+
+# ── Livros e Papelaria ────────────────────────────────────────────────────
+"4761001": "shop=books"          # Comércio varejista de livros
+"4761002": "shop=stationery"     # Comércio varejista de jornais e revistas
+"4761003": "shop=stationery"     # Comércio varejista de artigos de papelaria
+"4762800": "shop=music"          # Comércio varejista de discos, CDs, DVDs e fitas
+
+# ── Esportes e Brinquedos ─────────────────────────────────────────────────
+"4763601": "shop=sports"         # Comércio varejista de brinquedos e artigos recreativos
+"4763602": "shop=sports"         # Comércio varejista de artigos esportivos
+"4763603": "shop=outdoor"        # Comércio varejista de bicicletas e triciclos; peças e acessórios
+"4763604": "shop=outdoor"        # Comércio varejista de artigos de caça, pesca e camping
+"4763605": "shop=sports"         # Comércio varejista de artigos de náutica
+"4763606": "shop=outdoor"        # Comércio varejista de embarcações e outros veículos recreativos; peças e acessórios
+
+# ── Farmácias e Drogarias (shop) ─────────────────────────────────────────
+# (veja também amenity=pharmacy acima)
+"4771701": "amenity=pharmacy"
+"4771702": "amenity=pharmacy"
+"4771703": "amenity=pharmacy"
+
+# ── Cosméticos e Perfumaria ───────────────────────────────────────────────
+"4772500": "shop=cosmetics"      # Comércio varejista de cosméticos, produtos de perfumaria e de higiene pessoal
+
+# ── Artigos Médicos / Ortopédicos ─────────────────────────────────────────
+"4773300": "shop=medical_supply" # Comércio varejista de artigos médicos e ortopédicos
+
+# ── Óptica ────────────────────────────────────────────────────────────────
+"4774100": "shop=optician"       # Comércio varejista de artigos de óptica
+
+# ── Vestuário / Roupas ────────────────────────────────────────────────────
+"4781400": "shop=clothes"        # Comércio varejista de artigos do vestuário e acessórios
+
+# ── Calçados ─────────────────────────────────────────────────────────────
+"4782201": "shop=shoes"          # Comércio varejista de calçados
+"4782202": "shop=shoes"          # Comércio varejista de artigos de viagem
+
+# ── Joias e Bijuterias ────────────────────────────────────────────────────
+"4783101": "shop=jewelry"        # Comércio varejista de joias e relógios
+"4783102": "shop=jewelry"        # Comércio varejista de bijuterias e artigos de armarinho
+
+# ── Pet Shop ──────────────────────────────────────────────────────────────
+"4789004": "shop=pet"            # Comércio varejista de animais vivos e de artigos e alimentos para animais de estimação
+
+# ── Flores e Plantas ─────────────────────────────────────────────────────
+"4789003": "shop=florist"        # Comércio varejista de flores, plantas e acessórios
+
+# ── Antiguidades ─────────────────────────────────────────────────────────
+"4785701": "shop=second_hand"    # Comércio varejista de antiguidades
+"4785799": "shop=second_hand"    # Comércio varejista de outros artigos usados
+
+# ── Carne / Frigorífico (varejo) ─────────────────────────────────────────
+"4729601": "shop=convenience"
+
+# ── Loja de Departamentos ─────────────────────────────────────────────────
+"4711304": "shop=department_store" # Lojas de departamentos ou magazines
+
+# ── Automóveis (concessionária / compra e venda) ──────────────────────────
+"4511101": "shop=car"            # Comércio a varejo de automóveis, camionetas e utilitários novos
+"4511102": "shop=car"            # Comércio a varejo de automóveis, camionetas e utilitários usados
+"4511103": "shop=car"            # Comércio por atacado de automóveis, camionetas e utilitários novos
+"4511104": "shop=car"            # Comércio por atacado de automóveis, camionetas e utilitários usados
+"4511105": "shop=car"            # Comércio a varejo de automóveis, camionetas e utilitários novos e usados
+"4512901": "shop=car"            # Representantes comerciais e agentes do comércio de veículos
+"4512902": "shop=car"            # Comércio a varejo de tratores, máquinas e equipamentos pesados
+"4541201": "shop=motorcycle"     # Comércio por atacado de motocicletas e motonetas
+"4541202": "shop=motorcycle"     # Comércio a varejo de motocicletas e motonetas novas
+"4541203": "shop=motorcycle"     # Comércio a varejo de motocicletas e motonetas usadas
+"4541204": "shop=motorcycle"     # Comércio a varejo de peças e acessórios para motocicletas
+
+# ── Peças e Acessórios Automotivos ────────────────────────────────────────
+"4530701": "shop=car_parts"      # Comércio por atacado de peças e acessórios novos para veículos automotores
+"4530702": "shop=car_parts"      # Comércio por atacado de pneumáticos e câmaras-de-ar
+"4530703": "shop=car_parts"      # Comércio a varejo de peças e acessórios novos para veículos automotores
+"4530704": "shop=car_parts"      # Comércio a varejo de peças e acessórios usados para veículos automotores
+"4530705": "shop=car_parts"      # Comércio a varejo de pneumáticos e câmaras-de-ar
+
+# ── Cabeleireiro / Salão de Beleza ────────────────────────────────────────
+"9602501": "shop=hairdresser"    # Cabeleireiros, manicure e pedicure
+"9602502": "shop=beauty"         # Atividades de estética e outros serviços de cuidados com a beleza
+
+# ── Chaveiro ─────────────────────────────────────────────────────────────
+"9529101": "shop=locksmith"      # Reparação de calçados, bolsas e artigos de couro
+"9529105": "shop=locksmith"      # Reparação de artigos do mobiliário
+
+# ════════════════════════════════════════════════════════════════════════════
+# TOURISM
+# ════════════════════════════════════════════════════════════════════════════
+
+"5510801": "tourism=hotel"       # Hotéis
+"5510802": "tourism=hotel"       # Apart-hotéis
+"5510803": "tourism=hotel"       # Resorts
+"5590601": "tourism=hostel"      # Albergues, exceto assistenciais
+"5590602": "tourism=guest_house" # Campings
+"5590603": "tourism=motel"       # Pensões (establ. de hospedagem)
+"5590699": "tourism=guest_house" # Outros alojamentos não especificados
+"5510804": "tourism=motel"       # Motéis
+"7911200": "tourism=travel_agency" # Agências de viagens
+"7912100": "tourism=travel_agency" # Operadores turísticos
+"7990200": "tourism=information"   # Serviços de reservas e outros serviços de turismo
+
+# ════════════════════════════════════════════════════════════════════════════
+# LEISURE
+# ════════════════════════════════════════════════════════════════════════════
+
+"9311500": "leisure=sports_centre"   # Gestão de instalações de esportes
+"9312300": "leisure=sports_centre"   # Clubes sociais, esportivos e similares
+"9313100": "leisure=fitness_centre"  # Atividades de condicionamento físico (academias)
+"9319101": "leisure=sports_centre"   # Produção e promoção de eventos esportivos
+"9319199": "leisure=sports_centre"   # Outras atividades esportivas NE
+"9321200": "leisure=amusement_arcade" # Parques de diversão e parques temáticos
+"9329801": "leisure=bowling_alley"   # Discotecas, danceterias, salões de dança e similares
+"9329802": "leisure=amusement_arcade" # Exploração de boliches
+"9329803": "leisure=amusement_arcade" # Exploração de jogos de sinuca, bilhar e similares
+"9329804": "leisure=escape_game"     # Exploração de jogos eletrônicos recreativos
+"9329899": "leisure=playground"      # Outras atividades de recreação e lazer NE
+"9001901": "leisure=theatre"
+"9102302": "leisure=zoo"
+"9102303": "leisure=nature_reserve"  # Jardins botânicos
+"5912001": "leisure=cinema"          # Serviços de dublagem
+"5914600": "leisure=cinema"          # Atividades de exibição cinematográfica
+
+# ════════════════════════════════════════════════════════════════════════════
+# OFFICE
+# ════════════════════════════════════════════════════════════════════════════
+
+"6911701": "office=lawyer"           # Serviços advocatícios
+"6911702": "office=lawyer"           # Atividades auxiliares da justiça
+"6911703": "office=lawyer"           # Agente de propriedade industrial
+"6920601": "office=accountant"       # Atividades de contabilidade
+"6920602": "office=accountant"       # Escritórios de contabilidade
+"7111100": "office=architect"        # Serviços de arquitetura
+"7112000": "office=engineer"         # Serviços de engenharia
+"7119701": "office=engineer"         # Serviços de cartografia, topografia e geodésia
+"7119702": "office=engineer"         # Atividades de estudos geológicos
+"7119703": "office=engineer"         # Serviços de desenho técnico relacionados à arquitetura e engenharia
+"7119704": "office=engineer"         # Serviços de perícia técnica relacionados à arquitetura e engenharia
+"7119799": "office=engineer"         # Outras atividades de serviços de arquitetura e engenharia NE
+"6621501": "office=insurance"        # Seguros de vida
+"6621502": "office=insurance"        # Planos de auxílio-funeral
+"6622300": "office=insurance"        # Corretores e agentes de seguros, de planos de previdência complementar e de saúde
+"6629100": "office=insurance"        # Atividades auxiliares dos seguros, da previdência complementar e dos planos de saúde NE
+"6630400": "office=financial_advisor" # Atividades de administração de fundos por contrato ou comissão
+"6810201": "office=real_estate"      # Compra e venda de imóveis próprios
+"6810202": "office=real_estate"      # Aluguel de imóveis próprios
+"6821801": "office=real_estate"      # Corretagem na compra e venda e avaliação de imóveis
+"6821802": "office=real_estate"      # Corretagem no aluguel de imóveis
+"6822600": "office=property_management" # Gestão e administração da propriedade imobiliária
+"7020400": "office=consulting"       # Atividades de consultoria em gestão empresarial
+"7110500": "office=engineer"         # Atividades de tecnologia da informação
+"6201501": "office=it"               # Desenvolvimento de programas de computador sob encomenda
+"6201502": "office=it"               # Web design
+"6202300": "office=it"               # Desenvolvimento e licenciamento de programas de computador customizáveis
+"6203100": "office=it"               # Desenvolvimento e licenciamento de programas de computador não-customizáveis
+"6209100": "office=it"               # Suporte técnico, manutenção e outros serviços em tecnologia da informação
+"6311900": "office=it"               # Tratamento de dados, provedores de serviços de aplicação
+"6319400": "office=it"               # Portais, provedores de conteúdo e outros serviços de informação na internet
+"7210000": "office=research"         # Pesquisa e desenvolvimento experimental em ciências físicas e naturais
+"7220700": "office=research"         # Pesquisa e desenvolvimento experimental em ciências sociais e humanas
+"7310500": "office=advertising"      # Agências de publicidade
+"7311400": "office=advertising"      # Agências de publicidade
+"7319001": "office=advertising"      # Criação de estandes para feiras e exposições
+"7319002": "office=advertising"      # Promoção de vendas
+"7319003": "office=advertising"      # Marketing direto
+"7319004": "office=advertising"      # Consultoria em publicidade
+"7319099": "office=advertising"      # Outras atividades de publicidade NE
+"7410202": "office=advertising"      # Design de produto
+"7490101": "office=consulting"       # Serviços de tradução, interpretação e similares
+"7490102": "office=consulting"       # Escafandria e mergulho
+"7490103": "office=consulting"       # Serviços de agronomia e de consultoria às atividades agrícolas e pecuárias
+"7490104": "office=consulting"       # Atividades de intermediação e agenciamento de serviços e negócios em geral
+"7490105": "office=consulting"       # Agenciamento de profissionais para atividades esportivas, culturais e artísticas
+"8291100": "office=administrative"   # Atividades de cobranças e informações cadastrais
+"8292000": "office=administrative"   # Envasamento e empacotamento sob contrato
+
+# ════════════════════════════════════════════════════════════════════════════
+# CRAFT
+# ════════════════════════════════════════════════════════════════════════════
+
+"4321500": "craft=electrician"       # Instalação e manutenção elétrica
+"4322301": "craft=plumber"           # Instalações hidráulicas, sanitárias e de gás
+"4322302": "craft=plumber"           # Instalação e manutenção de sistemas centrais de ar condicionado
+"4322303": "craft=plumber"           # Instalações de sistema de prevenção contra incêndio
+"4329101": "craft=electrician"       # Instalação de painéis publicitários
+"4329102": "craft=electrician"       # Instalação de equipamentos para orientação à navegação marítima
+"4329103": "craft=carpenter"         # Instalação, manutenção e reparação de elevadores, escadas e esteiras rolantes
+"4329104": "craft=plumber"           # Montagem e instalação de sistemas e equipamentos de iluminação e sinalização
+"4329105": "craft=carpenter"         # Tratamentos térmicos, acústicos ou de vibração
+"4329199": "craft=carpenter"         # Outras obras de instalações em construções NE
+"4391600": "craft=carpenter"         # Obras de fundações
+"4399101": "craft=carpenter"         # Administração de obras
+"4399102": "craft=carpenter"         # Montagem e desmontagem de andaimes e outras estruturas temporárias
+"4399103": "craft=carpenter"         # Obras de alvenaria
+"4399104": "craft=carpenter"         # Serviços de operação e fornecimento de equipamentos para transporte
+"4399105": "craft=carpenter"         # Perfuração e construção de poços de água
+"4399199": "craft=carpenter"         # Serviços especializados para construção NE
+"9529102": "craft=shoemaker"         # Chaveiros
+"9529103": "craft=tailor"            # Reparação de relógios
+"9529104": "craft=carpenter"         # Reparação de bicicletas, triciclos e outros veículos não-motorizados
+"9529199": "craft=repair"            # Reparação e manutenção de outros objetos e equipamentos pessoais NE
+"9511800": "craft=electronics_repair" # Reparação e manutenção de computadores e de equipamentos periféricos
+"9512600": "craft=electronics_repair" # Reparação e manutenção de equipamentos de comunicação
+"9521500": "craft=electronics_repair" # Reparação e manutenção de equipamentos eletroeletrônicos de uso pessoal e doméstico
+"9522200": "craft=appliance_repair"  # Reparação e manutenção de eletrodomésticos e equipamentos domésticos
+"9523700": "craft=carpenter"         # Reparação de calçados, bolsas e artigos de couro
+"9524500": "craft=carpenter"         # Reparação e manutenção de móveis e do mobiliário doméstico
+"9525300": "craft=jeweller"          # Reparação e manutenção de artigos de joalheria e de cutelaria
+"9529101": "craft=shoemaker"         # Reparação de calçados
+"9529102": "craft=locksmith"         # Chaveiros
+
+# ── Oficinas Mecânicas ────────────────────────────────────────────────────
+"4520001": "shop=car_repair"         # Serviços de manutenção e reparação mecânica de veículos automotores
+"4520002": "shop=car_repair"         # Serviços de lanternagem ou funilaria e pintura de veículos
+"4520003": "shop=car_repair"         # Serviços de manutenção e reparação de motores e transmissões de veículos
+"4520004": "shop=car_repair"         # Serviços de alinhamento e balanceamento de veículos
+"4520005": "shop=car_repair"         # Serviços de lavagem, lubrificação e polimento de veículos
+"4520006": "amenity=car_wash"        # Serviços de borracharia para veículos (sobrepõe com car_wash)
+"4520007": "shop=car_repair"         # Serviços de instalação, manutenção e reparação de acessórios
+"4520008": "shop=car_repair"         # Serviços de capotaria
+"4520009": "shop=car_repair"         # Serviços de manutenção e reparação de veículos
+
+# ════════════════════════════════════════════════════════════════════════════
+# HEALTHCARE
+# ════════════════════════════════════════════════════════════════════════════
+
+"8711501": "healthcare=nursing_home"  # Clínicas e residências geriátricas
+"8711502": "healthcare=nursing_home"  # Instituições de longa permanência para idosos
+"8711503": "healthcare=nursing_home"  # Atividades de assistência a deficientes físicos
+"8711504": "healthcare=nursing_home"  # Centros de apoio a pacientes com câncer e com AIDS
+"8711505": "healthcare=nursing_home"  # Condomínios residenciais para idosos
+"8712300": "healthcare=rehabilitation" # Atividades de fornecimento de infraestrutura de apoio e assistência a paciente
+"8720401": "healthcare=rehabilitation" # Atividades de centros de assistência psicossocial
+"8720402": "healthcare=rehabilitation" # Atividades de assistência psiquiátrica e de saúde mental em unidades hospitalares
+"8730101": "social_facility=group_home" # Orfanatos
+"8730102": "social_facility=group_home" # Albergues assistenciais
+"8730199": "social_facility=group_home" # Atividades de assistência social NE com alojamento
+"8800600": "social_facility=day_care"  # Serviços de assistência social sem alojamento
+
+# ════════════════════════════════════════════════════════════════════════════
+# EDUCATION
+# ════════════════════════════════════════════════════════════════════════════
+
+"8511200": "amenity=kindergarten"    # Educação infantil - creche
+"8512100": "amenity=school"          # Educação infantil - pré-escola
+"8513900": "amenity=school"          # Ensino fundamental
+"8520100": "amenity=school"          # Ensino médio
+"8531700": "amenity=university"      # Educação superior - graduação
+"8532500": "amenity=university"      # Educação superior - graduação e pós-graduação
+"8533300": "amenity=university"      # Educação superior - pós-graduação e extensão
+"8541400": "amenity=college"         # Educação profissional de nível técnico
+"8542200": "amenity=college"         # Educação profissional de nível tecnológico
+"8550301": "amenity=school"          # Administração cedo e desenvolvimento de recursos humanos
+"8550302": "amenity=school"          # Atividades de apoio à educação, exceto caixas escolares
+"8591100": "leisure=sports_centre"   # Ensino de esportes
+"8592901": "amenity=music_school"    # Ensino de dança
+"8592902": "amenity=music_school"    # Ensino de artes cênicas, exceto dança
+"8592903": "amenity=music_school"    # Ensino de música
+"8592904": "amenity=arts_centre"     # Ensino de artes visuais
+"8593700": "amenity=language_school" # Ensino de idiomas
+"8599601": "amenity=school"          # Formação de condutores (auto escola)
+"8599602": "amenity=school"          # Cursos de pilotagem
+"8599603": "amenity=school"          # Treinamento em informática
+"8599604": "amenity=school"          # Treinamento em desenvolvimento profissional e gerencial
+"8599605": "amenity=school"          # Cursos preparatórios para concursos
+"8599699": "amenity=school"          # Outras atividades de ensino NE
+
+# ════════════════════════════════════════════════════════════════════════════
+# TRANSPORT / INFRASTRUCTURE
+# ════════════════════════════════════════════════════════════════════════════
+
+"4921301": "amenity=bus_station"     # Transporte rodoviário coletivo de passageiros, com itinerário fixo, municipal
+"4921302": "amenity=bus_station"     # Transporte rodoviário coletivo de passageiros, com itinerário fixo, intermunicipal
+"4921303": "amenity=bus_station"     # Transporte rodoviário coletivo de passageiros com itinerário fixo, interestadual
+"4921304": "amenity=bus_station"     # Transporte rodoviário coletivo de passageiros com itinerário fixo, internacional
+"4922101": "amenity=taxi"            # Transporte rodoviário de táxi
+"4922102": "amenity=taxi"            # Transporte escolar
+"4922103": "amenity=taxi"            # Serviço de táxi-lotação
+"4929901": "amenity=taxi"            # Transporte rodoviário coletivo de passageiros, sob regime de fretamento municipal
+"4929902": "amenity=taxi"            # Transporte rodoviário coletivo de passageiros, sob regime de fretamento intermunicipal
+"4930202": "amenity=taxi"            # Transporte rodoviário de mudança
+"5111100": "aeroway=aerodrome"       # Transporte aéreo de passageiros regular
+"5112901": "aeroway=aerodrome"       # Serviços aéreos de instrução
+"5112999": "aeroway=aerodrome"       # Outros serviços aéreos
+"5212500": "amenity=bus_station"     # Terminais rodoviários e ferroviários
+"5221400": "amenity=car_rental"      # Concessionárias de rodovias, pontes, túneis e serviços relacionados
+"5222200": "amenity=car_rental"      # Terminais e embarcadouros
+"5229002": "amenity=car_rental"      # Serviços de aluguel de automóveis sem condutor
+
+# ════════════════════════════════════════════════════════════════════════════
+# INDUSTRIAL / WHOLESALE (não são POIs típicos mas mapeados para completude)
+# ════════════════════════════════════════════════════════════════════════════
+
+"5611206": "amenity=restaurant"      # Restaurantes tipo bufê
+"5611207": "amenity=restaurant"      # Restaurantes e cantinas
+
+# ════════════════════════════════════════════════════════════════════════════
+# OUTROS SERVIÇOS PESSOAIS
+# ════════════════════════════════════════════════════════════════════════════
+
+"9609201": "shop=tattoo"             # Clínicas de estética e similares
+"9609202": "amenity=studio_photo"    # Agências matrimoniais
+"9609203": "shop=beauty"             # Alojamento, higiene e embelezamento de animais
+"9609204": "amenity=studio_photo"    # Exploração de máquinas de serviços pessoais
+"9609299": "amenity=studio_photo"    # Outras atividades de serviços pessoais NE
+
+# ════════════════════════════════════════════════════════════════════════════
+# ENERGIA / UTILITIES
+# ════════════════════════════════════════════════════════════════════════════
+
+"3511501": "power=substation"        # Geração de energia elétrica
+"3511502": "power=substation"        # Centrais geradoras de energia elétrica
+"3512300": "power=substation"        # Transmissão de energia elétrica
+"3513100": "power=substation"        # Comércio atacadista de energia elétrica
+"3514000": "power=substation"        # Distribuição de energia elétrica
+"3600601": "man_made=water_works"    # Captação, tratamento e distribuição de água
+"3701100": "man_made=wastewater_plant" # Gestão de redes de esgoto
+"3702900": "man_made=wastewater_plant" # Atividades relacionadas a esgoto
+"3811400": "landuse=industrial"      # Coleta de resíduos não-perigosos
+"3812200": "landuse=industrial"      # Coleta de resíduos perigosos
+"3821100": "landuse=industrial"      # Tratamento e disposição de resíduos não-perigosos
+"3822000": "landuse=industrial"      # Tratamento e disposição de resíduos perigosos
+
+# ════════════════════════════════════════════════════════════════════════════
+# AGROPECUÁRIA (baixa relevância POI mas mapeado)
+# ════════════════════════════════════════════════════════════════════════════
+
+"0111301": "landuse=farmland"        # Cultivo de arroz
+"0111302": "landuse=farmland"        # Cultivo de milho
+"0111303": "landuse=farmland"        # Cultivo de trigo
+"0119901": "landuse=farmland"        # Cultivo de soja
+"0151201": "landuse=farmland"        # Criação de bovinos e búfalos para corte
+"0151202": "landuse=farmland"        # Criação de bovinos para leite
+"0153901": "landuse=farmland"        # Criação de animais de pequeno porte
+
+# ════════════════════════════════════════════════════════════════════════════
+# ATACADO (wholesale — geralmente não são POIs de varejo)
+# ════════════════════════════════════════════════════════════════════════════
+
+# Incluídos apenas os atacadistas com relevância de POI
+
+"4631100": "shop=wholesale"          # Comércio atacadista de leite e laticínios
+"4637101": "shop=wholesale"          # Comércio atacadista de café torrado e moído, cacau, chá, mate e especiarias
+"4637102": "shop=wholesale"          # Comércio atacadista de açúcares
+"4637103": "shop=wholesale"          # Comércio atacadista de óleos e gorduras
+"4637104": "shop=wholesale"          # Comércio atacadista de pães, biscoitos, bolos
+"4637105": "shop=wholesale"          # Comércio atacadista de massas alimentícias
+"4637106": "shop=wholesale"          # Comércio atacadista de sorvetes
+"4637107": "shop=wholesale"          # Comércio atacadista de chocolates, balas, bombons e semelhantes
+"4637199": "shop=wholesale"          # Comércio atacadista especializado em outros produtos alimentícios

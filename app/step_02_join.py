@@ -4,6 +4,7 @@ Reads:
   data/intermediate/step_01_estab_<dump_date>.parquet
   data/intermediate/step_01_empresas_<dump_date>.parquet
   data/input/<dump_date>/Cnaes.zip  (and other lookup zips)
+  app/cnae_osm_map.yaml             (CNAE → OSM tag mapping)
 
 Writes:
   data/intermediate/step_02_poi_joined_<dump_date>.parquet
@@ -17,6 +18,7 @@ import time
 from pathlib import Path
 
 import duckdb
+import yaml
 
 from app.config_loader import get_config
 from app.schema import (
@@ -98,6 +100,22 @@ def run(
 
     con = duckdb.connect(":memory:", config={"threads": threads, "memory_limit": mem})
 
+    # ── Load OSM category map ─────────────────────────────────────────────
+    osm_map_path = Path(__file__).parent / "cnae_osm_map.yaml"
+    with open(osm_map_path, "r", encoding="utf-8") as fh:
+        osm_map: dict = yaml.safe_load(fh) or {}
+
+    if osm_map:
+        values_sql = ", ".join(f"('{k}', '{v}')" for k, v in osm_map.items())
+        con.execute(f"""
+            CREATE TEMP TABLE osm_map (cnae_code VARCHAR, osm_category VARCHAR);
+            INSERT INTO osm_map VALUES {values_sql};
+        """)
+        log.debug("Loaded %d CNAE → OSM mappings", len(osm_map))
+    else:
+        con.execute("CREATE TEMP TABLE osm_map (cnae_code VARCHAR, osm_category VARCHAR)")
+        log.warning("OSM map is empty — osm_category will be null for all records")
+
     versioned_dir = raw_dir / dump_date
 
     t0 = time.perf_counter()
@@ -143,6 +161,7 @@ def run(
                 e.cnae_fiscal_principal,
                 COALESCE(c.descricao, e.cnae_fiscal_principal) AS cnae_fiscal_principal_descricao,
                 e.cnae_fiscal_secundaria,
+                om.osm_category,
                 e.identificador_matriz_filial,
                 e.situacao_cadastral,
                 e.data_situacao_cadastral,
@@ -163,9 +182,10 @@ def run(
                 e.correio_eletronico
             FROM estab e
             JOIN empresas emp USING (cnpj_basico)
-            LEFT JOIN lu_cnae      c ON c.codigo = e.cnae_fiscal_principal
-            LEFT JOIN lu_natureza  n ON n.codigo = emp.natureza_juridica
-            LEFT JOIN lu_municipio m ON m.codigo = e.municipio
+            LEFT JOIN lu_cnae      c  ON c.codigo  = e.cnae_fiscal_principal
+            LEFT JOIN lu_natureza  n  ON n.codigo  = emp.natureza_juridica
+            LEFT JOIN lu_municipio m  ON m.codigo  = e.municipio
+            LEFT JOIN osm_map      om ON om.cnae_code = e.cnae_fiscal_principal
             {extra_sql}
         ) TO '{joined_out}'
         (FORMAT PARQUET, COMPRESSION '{compression}', ROW_GROUP_SIZE {row_group})

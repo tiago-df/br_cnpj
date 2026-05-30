@@ -70,6 +70,7 @@ OUTPUT_COLUMNS = [
     "cnae_fiscal_principal",
     "cnae_fiscal_principal_descricao",
     "cnae_fiscal_secundaria",
+    "osm_category",               # OSM tag: amenity=fuel, shop=supermarket, etc.
     "identificador_matriz_filial",
     "situacao_cadastral",
     "data_situacao_cadastral",
