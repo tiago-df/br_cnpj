@@ -1,16 +1,20 @@
 """Step 0 — Download Receita Federal CNPJ dump files.
 
-Downloads are stored in versioned subdirectories:
-    data/input/<YYYY-MM>/Estabelecimentos0.zip
-    data/input/<YYYY-MM>/Empresas0.zip
+The source site organises dumps as dated directories:
+    https://dados-abertos-rf-cnpj.casadosdados.com.br/arquivos/YYYY-MM-DD/
+
+Downloads are stored locally in versioned subdirectories:
+    data/input/<YYYY-MM-DD>/Estabelecimentos0.zip
+    data/input/<YYYY-MM-DD>/Empresas0.zip
     ...
 
 Usage (called from main.py or directly):
-    python -m app.download --dump-date 2026-05
-    python -m app.download --dump-date 2026-05 --dry-run
-    python -m app.download --dump-date 2026-05 --types emp estab
-    python -m app.download --dump-date 2026-05 --resume
-    python -m app.download --dump-date 2026-05 --force
+    python -m app.download                        # latest available dump
+    python -m app.download --dump-date 2026-04-12 # specific dump date
+    python -m app.download --dry-run              # list files without downloading
+    python -m app.download --types emp estab      # download only specific types
+    python -m app.download --resume               # resume partial downloads
+    python -m app.download --force                # re-download even if complete
 """
 
 import argparse
@@ -19,7 +23,6 @@ import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
 from pathlib import Path
 
 import requests
@@ -29,6 +32,8 @@ from app.config_loader import get_config, resolve_path
 from app.utils.logging_utils import setup_logging
 
 log = logging.getLogger(__name__)
+
+ARQUIVOS_PATH = "/arquivos/"
 
 TYPE_PATTERNS: dict[str, str] = {
     "emp":       r"Empresas\d+\.zip",
@@ -40,31 +45,31 @@ TYPE_PATTERNS: dict[str, str] = {
     "quals":     r"Qualificacoes\.zip",
     "motivos":   r"Motivos\.zip",
     "simples":   r"Simples\.zip",
+    "socios":    r"Socios\d+\.zip",
 }
 
 ALL_TYPES = list(TYPE_PATTERNS.keys())
 
 
-def fetch_file_list(session: requests.Session, base_url: str) -> list[dict]:
-    resp = session.get(f"{base_url}/", timeout=30)
+def fetch_latest_dump_date(session: requests.Session, base_url: str) -> str:
+    """Return the most recent dump date (YYYY-MM-DD) from the /arquivos/ index."""
+    resp = session.get(f"{base_url}{ARQUIVOS_PATH}", timeout=30)
     resp.raise_for_status()
+    # Dates appear as href="YYYY-MM-DD/"
+    dates = re.findall(r'href="(\d{4}-\d{2}-\d{2})/"', resp.text)
+    if not dates:
+        raise RuntimeError("Could not find any dated dump directories in /arquivos/")
+    return sorted(dates)[-1]
 
-    files = []
-    for match in re.finditer(r'href="([^"]+\.zip)"[^>]*>([^<]*)</a>', resp.text, re.IGNORECASE):
-        href, label = match.group(1), match.group(2).strip()
-        url = href if href.startswith("http") else f"{base_url}/{href.lstrip('/')}"
-        name = url.split("/")[-1]
-        files.append({"name": name, "url": url, "label": label or name})
 
-    if not files:
-        for match in re.finditer(r'href="([^"]+\.zip)"', resp.text, re.IGNORECASE):
-            href = match.group(1)
-            url = href if href.startswith("http") else f"{base_url}/{href.lstrip('/')}"
-            name = url.split("/")[-1]
-            if not any(f["name"] == name for f in files):
-                files.append({"name": name, "url": url, "label": name})
-
-    return files
+def fetch_file_list(session: requests.Session, base_url: str, dump_date: str) -> list[dict]:
+    """Return [{name, url}] for all zip files in the given dump directory."""
+    url = f"{base_url}{ARQUIVOS_PATH}{dump_date}/"
+    resp = session.get(url, timeout=30)
+    resp.raise_for_status()
+    # Links look like: href="Empresas0.zip"
+    names = re.findall(r'href="([^"?/][^"]*\.zip)"', resp.text)
+    return [{"name": n, "url": f"{url}{n}"} for n in names]
 
 
 def filter_by_type(files: list[dict], types: list[str]) -> list[dict]:
@@ -85,28 +90,25 @@ def download_file(
 
     cfg = get_config()
     attempts = cfg["download"]["retry_attempts"]
-    backoff = cfg["download"]["retry_backoff_seconds"]
+    backoff  = cfg["download"]["retry_backoff_seconds"]
 
     for attempt in range(1, attempts + 1):
         try:
-            resp = session.get(url, headers=headers, stream=True, timeout=60)
+            resp = session.get(url, headers=headers, stream=True, timeout=120)
             if resume and existing_bytes and resp.status_code == 416:
-                return dest
+                return dest  # already complete
             resp.raise_for_status()
 
             total = int(resp.headers.get("content-length", 0)) + existing_bytes
-            mode = "ab" if existing_bytes else "wb"
+            mode  = "ab" if existing_bytes else "wb"
 
             with (
                 open(dest, mode) as fh,
                 tqdm(
                     total=total or None,
                     initial=existing_bytes,
-                    unit="B",
-                    unit_scale=True,
-                    unit_divisor=1024,
-                    desc=dest.name,
-                    leave=False,
+                    unit="B", unit_scale=True, unit_divisor=1024,
+                    desc=dest.name, leave=False,
                 ) as bar,
             ):
                 for chunk in resp.iter_content(chunk_size):
@@ -132,45 +134,51 @@ def is_valid_zip(path: Path) -> bool:
 
 
 def run(
-    dump_date: str,
-    types: list[str],
     raw_dir: Path,
+    dump_date: str | None = None,
+    types: list[str] | None = None,
     resume: bool = False,
     force: bool = False,
     dry_run: bool = False,
-) -> Path:
-    """Download dump files for the given month. Returns the versioned input directory."""
-    cfg = get_config()
+) -> tuple[str, Path]:
+    """Download dump files. Returns (dump_date, versioned_input_dir)."""
+    cfg      = get_config()
     base_url = cfg["source"]["base_url"]
-    chunk_size = cfg["download"]["chunk_size_mb"] * 1024 * 1024
-    workers = cfg["download"]["workers"]
-
-    versioned_dir = raw_dir / dump_date
-    versioned_dir.mkdir(parents=True, exist_ok=True)
+    chunk    = cfg["download"]["chunk_size_mb"] * 1024 * 1024
+    workers  = cfg["download"]["workers"]
+    types    = types or ALL_TYPES
 
     session = requests.Session()
     session.headers["User-Agent"] = "cnpj-poi-pipeline/2.0"
 
-    log.info("Fetching file index from %s…", base_url)
-    all_files = fetch_file_list(session, base_url)
-    files = filter_by_type(all_files, types)
+    if not dump_date:
+        log.info("Fetching dump index to find latest available date…")
+        dump_date = fetch_latest_dump_date(session, base_url)
+        log.info("Latest dump: %s", dump_date)
+
+    all_files = fetch_file_list(session, base_url, dump_date)
+    files     = filter_by_type(all_files, types)
 
     if not files:
-        raise ValueError(f"No files matched types: {types}")
+        raise ValueError(f"No files matched types {types} for dump {dump_date}")
 
-    log.info("Found %d file(s) for types %s", len(files), types)
+    log.info("Dump date  : %s", dump_date)
+    log.info("Files found: %d", len(files))
     for f in files:
         log.info("  %s", f["name"])
 
+    versioned_dir = raw_dir / dump_date
+    versioned_dir.mkdir(parents=True, exist_ok=True)
+
     if dry_run:
-        return versioned_dir
+        return dump_date, versioned_dir
 
     def _download(f: dict) -> tuple[str, bool]:
         dest = versioned_dir / f["name"]
         if not force and is_valid_zip(dest):
-            log.info("  ✓ %s already complete, skipping (use --force to re-download)", f["name"])
+            log.info("  ✓ %s already complete, skipping", f["name"])
             return f["name"], True
-        download_file(session, f["url"], dest, chunk_size, resume=resume and not force)
+        download_file(session, f["url"], dest, chunk, resume=resume and not force)
         ok = is_valid_zip(dest)
         if ok:
             log.info("  ✓ %s", f["name"])
@@ -190,24 +198,27 @@ def run(
         raise RuntimeError(f"Download failed for: {failed}")
 
     log.info("Download complete → %s", versioned_dir)
-    return versioned_dir
+    return dump_date, versioned_dir
 
 
 def main():
     setup_logging(resolve_path("log_dir"))
 
     parser = argparse.ArgumentParser(description="Download RF CNPJ dump files")
-    parser.add_argument("--dump-date", default=date.today().strftime("%Y-%m"),
-                        help="Dump month, e.g. 2026-05 (default: current month)")
+    parser.add_argument("--dump-date", default=None,
+                        help="Dump date YYYY-MM-DD (default: latest available)")
     parser.add_argument("--types", nargs="+", choices=ALL_TYPES, default=ALL_TYPES)
-    parser.add_argument("--resume", action="store_true", help="Resume partial downloads")
-    parser.add_argument("--force", action="store_true", help="Re-download even if file exists")
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--force",  action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     input_dir = resolve_path("input_dir")
     try:
-        run(args.dump_date, args.types, input_dir, args.resume, args.force, args.dry_run)
+        dump_date, dest = run(input_dir, args.dump_date, args.types,
+                              args.resume, args.force, args.dry_run)
+        log.info("Dump date used: %s", dump_date)
+        log.info("Input dir     : %s", dest)
     except Exception as exc:
         log.error("Download failed: %s", exc)
         sys.exit(1)
