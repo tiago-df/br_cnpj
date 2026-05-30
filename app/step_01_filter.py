@@ -42,7 +42,7 @@ def _read_csv_expr(csv_paths: list[str], columns: list[str], encoding: str, deli
     col_names = ", ".join(f"'{c}'" for c in columns)
     return (
         f"read_csv([{path_list}], "
-        f"header=false, sep='{delim}', encoding='{encoding}', "
+        f"auto_detect=false, header=false, sep='{delim}', encoding='{encoding}', "
         f"column_names=[{col_names}], all_varchar=true, ignore_errors=true)"
     )
 
