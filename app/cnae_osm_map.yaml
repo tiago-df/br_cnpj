@@ -728,3 +728,149 @@
 "4637106": "shop=wholesale"          # Comércio atacadista de sorvetes
 "4637107": "shop=wholesale"          # Comércio atacadista de chocolates, balas, bombons e semelhantes
 "4637199": "shop=wholesale"          # Comércio atacadista especializado em outros produtos alimentícios
+
+# Atacadistas adicionais (v0.3)
+"4639701": "shop=wholesale"          # Comércio atacadista de produtos alimentícios em geral
+"4633801": "shop=wholesale"          # Comércio atacadista de frutas, verduras, raízes, tubérculos, hortaliças
+"4663000": "shop=wholesale"          # Comércio atacadista de máquinas e equipamentos para uso industrial
+"4642701": "shop=wholesale"          # Comércio atacadista de artigos do vestuário e acessórios
+"4645101": "shop=wholesale"          # Comércio atacadista de instrumentos e materiais para uso médico, cirúrgico
+"4646001": "shop=wholesale"          # Comércio atacadista de cosméticos e produtos de perfumaria
+"4649499": "shop=wholesale"          # Comércio atacadista de outros equipamentos e artigos de uso pessoal
+"4661300": "shop=wholesale"          # Comércio atacadista de máquinas, aparelhos e equipamentos para uso agropecuário
+"4683400": "shop=wholesale"          # Comércio atacadista de defensivos agrícolas, adubos, fertilizantes
+"4686902": "shop=wholesale"          # Comércio atacadista de embalagens
+"4687703": "shop=wholesale"          # Comércio atacadista de resíduos e sucatas não metálicos
+"4689399": "shop=wholesale"          # Comércio atacadista de outros produtos químicos e petroquímicos
+"4691500": "shop=wholesale"          # Comércio atacadista de mercadorias em geral, com predominância de produtos alimentícios
+"4693100": "shop=wholesale"          # Comércio atacadista de mercadorias em geral, sem predominância de alimentos
+"4671100": "shop=wholesale"          # Comércio atacadista de madeira e produtos derivados
+"4672900": "shop=wholesale"          # Comércio atacadista de ferragens e ferramentas
+"4669999": "shop=wholesale"          # Comércio atacadista de outros materiais de construção
+"4679699": "shop=wholesale"          # Comércio atacadista de outros materiais de construção não especificados
+"4623109": "shop=wholesale"          # Comércio atacadista de alimentos para animais
+"4649408": "shop=wholesale"          # Comércio atacadista de produtos de higiene, limpeza e conservação domiciliar
+"4644301": "shop=wholesale"          # Comércio atacadista de medicamentos e drogas de uso humano
+
+# ════════════════════════════════════════════════════════════════════════════
+# CONSTRUÇÃO CIVIL — office=construction_company / craft=builder (v0.3)
+# ════════════════════════════════════════════════════════════════════════════
+
+# Incorporadores e construtoras (grandes obras) → office=construction_company
+"4110700": "office=construction_company"  # Incorporação de empreendimentos imobiliários (já mapeado em real_estate acima — duplicata intencional para cobertura)
+"4120400": "office=construction_company"  # Construção de edifícios (82K — maior CNAE não mapeado)
+"4121600": "office=construction_company"  # Construção de edifícios não-residenciais
+"4211101": "office=construction_company"  # Construção de rodovias e ferrovias
+"4212000": "office=construction_company"  # Construção de obras de arte especiais
+"4221901": "office=construction_company"  # Construção de barragens e represas para geração de energia elétrica
+"4221902": "office=construction_company"  # Construção de estações e redes de distribuição de energia elétrica
+"4221903": "office=construction_company"  # Manutenção de redes de distribuição de energia elétrica
+"4221904": "office=construction_company"  # Construção de estações e redes de telecomunicações
+"4221905": "office=construction_company"  # Manutenção de estações e redes de telecomunicações
+"4222701": "office=construction_company"  # Construção de redes de abastecimento de água, coleta de esgoto e construções correlatas
+"4222702": "office=construction_company"  # Obras de irrigação
+"4291000": "office=construction_company"  # Obras portuárias, marítimas e fluviais
+"4299501": "office=construction_company"  # Construção de instalações esportivas e recreativas
+"4313400": "office=construction_company"  # Obras de terraplenagem (9.5K)
+
+# Obras especializadas (serviços de campo) → craft=builder
+"4292801": "craft=builder"           # Montagem de estruturas metálicas
+"4292802": "craft=builder"           # Obras de montagem industrial
+"4299599": "craft=builder"           # Serviços especializados para construção não especificados anteriormente
+"4311801": "craft=builder"           # Demolição de edifícios e outras estruturas
+"4311802": "craft=builder"           # Preparação de canteiro e limpeza de terreno
+"4312600": "craft=builder"           # Perfurações e sondagens
+"4319300": "craft=builder"           # Serviços de preparação do terreno não especificados anteriormente
+"4213800": "craft=builder"           # Obras de urbanização — ruas, praças e calçadas
+"4330401": "craft=builder"           # Impermeabilização em obras de engenharia civil
+"4330402": "craft=builder"           # Instalação de portas, janelas, tetos, divisórias e armários embutidos
+"4330403": "craft=builder"           # Obras de acabamento em gesso e estuque
+"4330404": "craft=builder"           # Serviços de pintura de edifícios em geral
+"4330405": "craft=builder"           # Aplicação de revestimentos e de resinas em interiores e exteriores
+"4330499": "craft=builder"           # Outras obras de acabamento da construção
+"3321000": "craft=builder"           # Instalação de máquinas e equipamentos industriais
+
+# Eletricistas → craft=electrician
+"4321500": "craft=electrician"       # Instalação e manutenção elétrica
+
+# HVAC (climatização/hidráulica) → craft=hvac
+"4322301": "craft=hvac"              # Instalações hidráulicas, sanitárias e de gás
+"4322302": "craft=hvac"              # Instalação e manutenção de sistemas centrais de ar condicionado e ventilação
+
+# ════════════════════════════════════════════════════════════════════════════
+# METALURGIA E FABRICAÇÃO — craft=metal_construction (v0.3)
+# ════════════════════════════════════════════════════════════════════════════
+
+"2511000": "craft=metal_construction"  # Fabricação de estruturas metálicas (3.4K)
+"2512800": "craft=metal_construction"  # Fabricação de esquadrias de metal (7.2K)
+"2539001": "craft=metal_construction"  # Serviços de usinagem, tornearia e solda (8.5K)
+"2542000": "craft=metal_construction"  # Fabricação de artigos de serralheria, exceto esquadrias (5K)
+"2543800": "craft=metal_construction"  # Fabricação de ferramentas
+
+# ════════════════════════════════════════════════════════════════════════════
+# REPRESENTANTES COMERCIAIS — office=company (v0.3)
+# ════════════════════════════════════════════════════════════════════════════
+
+"4611700": "office=company"          # Representantes comerciais e agentes do comércio de matérias-primas
+"4612500": "office=company"          # Representantes comerciais e agentes do comércio de combustíveis, minerais
+"4613300": "office=company"          # Representantes comerciais e agentes do comércio de madeira, materiais de construção (9.3K)
+"4614100": "office=company"          # Representantes comerciais e agentes do comércio de máquinas, equipamentos industriais
+"4615000": "office=company"          # Representantes comerciais e agentes do comércio de eletrodomésticos
+"4616800": "office=company"          # Representantes comerciais e agentes do comércio de têxteis, vestuário (8.7K)
+"4617600": "office=company"          # Representantes comerciais e agentes do comércio de produtos alimentícios (13K)
+"4618401": "office=company"          # Representantes comerciais e agentes do comércio de medicamentos, farmacêuticos
+"4618499": "office=company"          # Representantes comerciais e agentes do comércio de outros produtos (9.4K)
+"4619200": "office=company"          # Representantes comerciais e agentes do comércio em geral (31K)
+
+# ════════════════════════════════════════════════════════════════════════════
+# SERVIÇOS FINANCEIROS — office=financial (v0.3)
+# ════════════════════════════════════════════════════════════════════════════
+
+"6462000": "office=financial"        # Holdings de instituições não financeiras (10K)
+"6463800": "office=financial"        # Outras sociedades de participação, exceto holdings (2.6K)
+"6619399": "office=financial"        # Outras atividades auxiliares dos serviços financeiros (2.5K)
+"7740300": "office=financial"        # Gestão de ativos intangíveis não-financeiros (2.4K)
+
+# ════════════════════════════════════════════════════════════════════════════
+# PRODUÇÃO AUDIOVISUAL — amenity=studio (v0.3)
+# ════════════════════════════════════════════════════════════════════════════
+
+"5911101": "amenity=studio"          # Estúdios cinematográficos
+"5911102": "amenity=studio"          # Produção de filmes para publicidade (2.5K)
+"5911199": "amenity=studio"          # Atividades de produção cinematográfica não especificadas (10K)
+"5912001": "amenity=studio"          # Serviços de dublagem
+"5912099": "amenity=studio"          # Atividades de pós-produção cinematográfica (3.3K)
+"5920100": "amenity=studio"          # Atividades de gravação de som e edição de música
+
+# ════════════════════════════════════════════════════════════════════════════
+# MÍDIA E COMUNICAÇÃO — office=media / office=publisher (v0.3)
+# ════════════════════════════════════════════════════════════════════════════
+
+"6010100": "office=media"            # Rádio (3.2K)
+"6021700": "office=media"            # Televisão aberta
+"6022501": "office=media"            # Programadoras de televisão por assinatura
+"6022502": "office=media"            # Atividades relacionadas à televisão por assinatura
+
+"5811500": "office=publisher"        # Edição de livros (3.4K)
+"5812301": "office=publisher"        # Edição de jornais diários
+"5812302": "office=publisher"        # Edição de jornais não diários
+"5813100": "office=publisher"        # Edição de revistas
+
+# ════════════════════════════════════════════════════════════════════════════
+# JARDINAGEM — craft=gardener (v0.3)
+# ════════════════════════════════════════════════════════════════════════════
+
+"8130300": "craft=gardener"          # Atividades paisagísticas (4.3K)
+
+# ════════════════════════════════════════════════════════════════════════════
+# PADARIA INDUSTRIAL — industrial=bakery (v0.3)
+# ════════════════════════════════════════════════════════════════════════════
+
+"1091101": "industrial=bakery"       # Fabricação de produtos de panificação industrial (3.6K)
+
+# ════════════════════════════════════════════════════════════════════════════
+# LOJAS ESPECIALIZADAS (v0.3)
+# ════════════════════════════════════════════════════════════════════════════
+
+"3299003": "shop=party"              # Fabricação de itens para festas e carnaval (3.4K)
+"3250706": "shop=medical_supply"     # Fabricação de artigos ópticos (2.6K)
