@@ -37,13 +37,29 @@ JOINED_OUT = "step_02_poi_joined_{date}.parquet"
 
 
 def _read_csv_expr(paths: list[str], columns: list[str], encoding: str, delim: str) -> str:
+    """Return a SQL expression that reads the CSVs with proper column names.
+
+    DuckDB 1.5.x: passing encoding= breaks the delimiter sniffer, causing only
+    1 column (column0) to be visible.  Without encoding, DuckDB correctly detects
+    all columns with zero-padded names (column00, column01, …).
+
+    Workaround: omit encoding so the sniffer works, then alias column00..columnN
+    to the real names in a subquery.  Key filter/join fields (situacao_cadastral,
+    uf, cnae, cnpj_basico) are pure ASCII so encoding is irrelevant for them.
+    Text fields (names, addresses) retain their raw Windows-1252 bytes in Parquet.
+    """
     path_list = ", ".join(f"'{p}'" for p in paths)
-    col_names  = ", ".join(f"'{c}'" for c in columns)
-    return (
-        f"read_csv([{path_list}], "
-        f"header=false, sep='{delim}', quote='\"', encoding='{encoding}', "
-        f"column_names=[{col_names}], all_varchar=true, ignore_errors=true)"
+    # DuckDB zero-pads auto-generated column names: column00, column01, …
+    width = len(str(len(columns) - 1))
+    aliases = ", ".join(
+        f"column{str(i).zfill(width)} AS {c}" for i, c in enumerate(columns)
     )
+    raw_read = (
+        f"read_csv([{path_list}], "
+        f"header=false, sep='{delim}', quote='\"', "
+        f"all_varchar=true, ignore_errors=true)"
+    )
+    return f"(SELECT {aliases} FROM {raw_read})"
 
 
 def _load_lookup(con: duckdb.DuckDBPyConnection, versioned_dir: Path,
