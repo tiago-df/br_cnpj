@@ -45,7 +45,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from tqdm.asyncio import tqdm as atqdm
+from tqdm import tqdm as atqdm
 
 from app.config_loader import get_config
 
@@ -152,7 +152,7 @@ async def _fetch_all_ceps(ceps: list[str], workers: int) -> list[dict]:
     async with aiohttp.ClientSession(connector=connector) as session:
         tasks = [_fetch_cep(session, cep, sem) for cep in ceps]
         results = []
-        async for coro in atqdm.as_completed(tasks, total=len(tasks), desc="  BrasilAPI CEP"):
+        for coro in atqdm(asyncio.as_completed(tasks), total=len(tasks), desc="  BrasilAPI CEP"):
             results.append(await coro)
     return results
 
@@ -257,7 +257,7 @@ async def _fetch_all_tomtom(rows: list[dict], api_key: str, workers: int) -> lis
     results = []
     async with aiohttp.ClientSession(connector=connector) as session:
         tasks = [_fetch_tomtom(session, r, api_key, sem) for r in rows]
-        async for coro in atqdm.as_completed(tasks, total=len(tasks), desc="  TomTom geocode"):
+        for coro in atqdm(asyncio.as_completed(tasks), total=len(tasks), desc="  TomTom geocode"):
             results.append(await coro)
     return results
 
