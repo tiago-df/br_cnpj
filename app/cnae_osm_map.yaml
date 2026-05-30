@@ -548,6 +548,160 @@
 "3822000": "landuse=industrial"      # Tratamento e disposição de resíduos perigosos
 
 # ════════════════════════════════════════════════════════════════════════════
+# OFFICE  (adicionados v0.2 — cobertura dos maiores CNAEs não mapeados)
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── Administrativo / Apoio empresarial ───────────────────────────────────
+"8211300": "office=administrative"   # Serviços combinados de escritório e apoio administrativo
+"8219999": "office=administrative"   # Preparação de documentos e serv. especializados NE
+"8219901": "office=administrative"   # Reprografia, digitalização e serviços relacionados
+"8299799": "office=company"          # Outras atividades de serviços prestados às empresas NE
+"8299706": "amenity=events_venue"    # Serviços de organização de feiras de amostras e exposições
+"8111700": "office=maintenance"      # Serviços combinados para manutenção de edifícios urbanos
+"8121400": "office=cleaning"         # Limpeza em prédios e em domicílios
+"8129000": "office=cleaning"         # Serviços de limpeza NE
+"8122200": "office=pest_control"     # Imunização e controle de pragas urbanas
+"8020001": "office=security"         # Atividades de monitoramento de sistemas de segurança
+"8011101": "office=security"         # Atividades de vigilância e segurança privada
+"8220200": "office=call_centre"      # Atividades de teleatendimento
+
+# ── Imobiliário ───────────────────────────────────────────────────────────
+"4110700": "office=real_estate"      # Incorporação de empreendimentos imobiliários
+"6810203": "office=real_estate"      # Loteamento de imóveis próprios
+
+# ── Logística / Transporte ────────────────────────────────────────────────
+"4930201": "office=logistics"        # Transporte rodoviário de carga, exceto produtos perigosos
+"4930203": "office=logistics"        # Transporte rodoviário de mudanças
+
+# ── TI / Telecom ─────────────────────────────────────────────────────────
+"6204000": "office=consulting"       # Consultoria em tecnologia da informação
+"6110803": "office=telecom"          # Serviços de comunicação multimídia (SCM)
+"6190601": "office=telecom"          # Provedores de acesso às redes de comunicações
+"6190699": "office=telecom"          # Outras atividades de telecomunicações NE
+
+# ── Publicidade / Design / Pesquisa ──────────────────────────────────────
+"7312200": "office=advertising"      # Agenciamento de espaços para publicidade
+"7410299": "office=design"           # Atividades de design NE
+"7410203": "office=design"           # Design de produto
+"7320300": "office=research"         # Pesquisas de mercado e de opinião pública
+"6391700": "office=newspaper"        # Agências de notícias
+
+# ── RH / Trabalho temporário ─────────────────────────────────────────────
+"7810800": "office=employment_agency" # Seleção e agenciamento de mão de obra
+"7820500": "office=employment_agency" # Locação de mão de obra temporária
+
+# ── Serviços profissionais NE ─────────────────────────────────────────────
+"7490199": "office=professional"     # Outras atividades profissionais, científicas e técnicas NE
+"6399200": "office=company"          # Outras atividades de serviços de informação NE
+"7120100": "office=company"          # Testes e análises técnicas
+
+# ── Manutenção / Reparo ───────────────────────────────────────────────────
+"3314707": "shop=repair"             # Manutenção e reparo de equipamentos e produtos NE
+"3314710": "shop=repair"             # Manutenção de máquinas e equipamentos para uso geral
+"3314711": "shop=repair"             # Manutenção e reparo de elevadores, escadas e esteiras
+"3314799": "shop=repair"             # Manutenção de outras máquinas NE
+"3319800": "shop=repair"             # Manutenção e reparo de outros equipamentos NE
+"3312102": "shop=repair"             # Manutenção e reparo de aparelhos e instrumentos ópticos
+"3312103": "shop=repair"             # Manutenção e reparo de aparelhos de medição
+"3313901": "shop=repair"             # Manutenção e reparo de geradores
+"3313999": "shop=repair"             # Manutenção e reparo de equipamentos elétricos NE
+"2950600": "shop=repair"             # Recondicionamento e recuperação de motores
+"2930101": "shop=repair"             # Recondicionamento de motores para veículos
+
+# ════════════════════════════════════════════════════════════════════════════
+# SHOP  (adicionados v0.2)
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── Varejo geral / variedades ─────────────────────────────────────────────
+"4789099": "shop=general"            # Comércio varejista de outros produtos NE
+"4789009": "shop=general"            # Comércio varejista de produtos NE
+"4713002": "shop=variety_store"      # Lojas de variedades, exceto lojas de departamentos
+"4713004": "shop=department_store"   # Lojas de departamentos ou magazines
+"4713005": "shop=duty_free"          # Lojas francas (Duty free) de aeroportos e portos
+
+# ── Alimentação (varejo) ──────────────────────────────────────────────────
+"1091102": "shop=bakery"             # Fabricação de produtos de padaria com produção própria
+"4721104": "shop=confectionery"      # Comércio varejista de doces, balas, bombons e semelhantes
+"4789007": "shop=chemist"            # Comércio varejista de produtos de higiene e toucador
+
+# ── Veículos e peças ──────────────────────────────────────────────────────
+"4541206": "shop=motorcycle"         # Comércio a varejo de motocicletas e motonetas novas
+"4543900": "shop=motorcycle"         # Comércio de peças e acessórios para motocicletas
+"4732600": "shop=car_parts"          # Comércio varejista de lubrificantes
+"4530706": "shop=car_parts"          # Comércio a varejo de peças e acessórios usados
+
+# ── Casa e decoração ──────────────────────────────────────────────────────
+"4784900": "shop=lighting"           # Comércio varejista de artigos de iluminação
+"4789005": "shop=stationery"         # Comércio varejista de produtos de artes gráficas
+
+# ── Flores e natureza ─────────────────────────────────────────────────────
+"4789002": "shop=florist"            # Comércio varejista de plantas e flores naturais
+
+# ── Vestuário (confecção própria com loja) ────────────────────────────────
+"1412601": "shop=clothes"            # Confecção de peças do vestuário, exceto roupas íntimas
+"1412602": "shop=clothes"            # Confecção de roupas profissionais, exceto sob medida
+"1412603": "shop=clothes"            # Facção de peças do vestuário, exceto roupas íntimas
+"1411801": "shop=clothes"            # Confecção de roupas íntimas
+"1413401": "shop=sports"             # Fabricação de roupas e acessórios para prática de esportes
+
+# ── Locação / Aluguel ─────────────────────────────────────────────────────
+"7711000": "amenity=car_rental"      # Locação de automóveis sem condutor
+"7732201": "shop=rental"             # Aluguel de máquinas e equipamentos para construção
+"7739099": "shop=rental"             # Locação de outros equipamentos não especificados
+"7739003": "shop=rental"             # Aluguel de palcos, coberturas e outras estruturas
+"7723300": "shop=rental"             # Aluguel de objetos do vestuário, joias e acessórios
+"7721700": "shop=rental"             # Aluguel de equipamentos recreativos e esportivos
+"7739002": "shop=rental"             # Aluguel de equipamentos científicos
+"7739001": "shop=rental"             # Aluguel de equipamentos de escritório
+
+# ════════════════════════════════════════════════════════════════════════════
+# AMENITY  (adicionados v0.2)
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── Eventos ───────────────────────────────────────────────────────────────
+"8230001": "amenity=events_venue"    # Serviços de organização de feiras, congressos e festas
+"8230002": "amenity=events_venue"    # Casas de festas e eventos
+
+# ── Saúde complementar ────────────────────────────────────────────────────
+"8690901": "amenity=clinic"          # Atividades de fonoaudiologia
+"8690904": "amenity=clinic"          # Atividades de podologia
+"8690999": "amenity=clinic"          # Outras atividades de atenção à saúde humana NE
+
+# ── Bem-estar ─────────────────────────────────────────────────────────────
+"9609205": "amenity=spa"             # Atividades de sauna e banhos
+
+# ── Cultura e lazer ───────────────────────────────────────────────────────
+"9103100": "amenity=library"         # Atividades de arquivos e museus
+"9101500": "amenity=library"         # Atividades de bibliotecas e arquivos
+"9002701": "amenity=arts_centre"     # Atividades de artistas plásticos, jornalistas e escritores
+"9002702": "amenity=arts_centre"     # Restauração e conservação de obras de arte
+
+# ── Fotografia ────────────────────────────────────────────────────────────
+"7420001": "amenity=photo_studio"    # Atividades de fotografia
+"7420004": "amenity=photo_studio"    # Filmagem de festas e eventos
+
+# ── Táxi / Transporte ─────────────────────────────────────────────────────
+"4923002": "amenity=taxi"            # Serviço de táxi
+"4924800": "amenity=bus_station"     # Transporte escolar
+
+# ── Alimentação (catering/delivery) ──────────────────────────────────────
+"5620104": "amenity=restaurant"      # Fornecimento de alimentos preparados para consumo domiciliar
+
+# ── Serviços financeiros ──────────────────────────────────────────────────
+"6619302": "amenity=bank"            # Correspondentes bancários
+
+# ── Educação ─────────────────────────────────────────────────────────────
+"8592999": "amenity=language_school" # Ensino de idiomas NE
+
+# ════════════════════════════════════════════════════════════════════════════
+# TOURISM  (adicionados v0.2)
+# ════════════════════════════════════════════════════════════════════════════
+
+"5250803": "tourism=travel_agency"   # Agências de viagens
+"5250804": "tourism=travel_agency"   # Operadoras de turismo
+"5250805": "tourism=travel_agency"   # Operador de transporte multimodal
+
+# ════════════════════════════════════════════════════════════════════════════
 # AGROPECUÁRIA (baixa relevância POI mas mapeado)
 # ════════════════════════════════════════════════════════════════════════════
 
