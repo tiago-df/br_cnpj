@@ -39,12 +39,11 @@ def _glob_zips(versioned_dir: Path, pattern: str) -> list[Path]:
 
 def _read_csv_expr(csv_paths: list[str], columns: list[str], encoding: str, delim: str) -> str:
     path_list = ", ".join(f"'{p}'" for p in csv_paths)
-    # auto_detect=false requires columns as {name: type} struct — all VARCHAR
-    col_struct = "{" + ", ".join(f"'{c}': 'VARCHAR'" for c in columns) + "}"
+    col_names  = ", ".join(f"'{c}'" for c in columns)
     return (
         f"read_csv([{path_list}], "
-        f"auto_detect=false, header=false, sep='{delim}', encoding='{encoding}', "
-        f"columns={col_struct}, ignore_errors=true)"
+        f"header=false, sep='{delim}', quote='\"', encoding='{encoding}', "
+        f"column_names=[{col_names}], all_varchar=true, ignore_errors=true)"
     )
 
 
