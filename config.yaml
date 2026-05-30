@@ -32,5 +32,5 @@ output:
   csv_compression: "gzip"
 
 file:
-  encoding: "latin1"
+  encoding: "windows-1252-2000"   # ICU name accepted by DuckDB (RF files are Windows-1252)
   delimiter: ";"
