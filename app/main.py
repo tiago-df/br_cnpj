@@ -75,7 +75,10 @@ def main():
     log = setup_logging(log_dir, level=logging.DEBUG if args.verbose else logging.INFO)
 
     if args.skip_download:
-        args.from_step = "filter"
+        # --skip-download means "at least skip download"; honour --from-step
+        # if the caller already specified a later step explicitly.
+        if STEP_ORDER.index(args.from_step) < STEP_ORDER.index("filter"):
+            args.from_step = "filter"
         if not args.dump_date:
             log.error("--skip-download requires --dump-date YYYY-MM-DD")
             sys.exit(1)
