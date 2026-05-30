@@ -154,6 +154,81 @@ python -m app.download --dump-date 2026-05 --dry-run  # list files only
 
 ---
 
+## Filtered Export (`export_filter`)
+
+After running the pipeline, export a filtered subset to any directory without re-running the full pipeline.
+
+### By OSM category and state
+
+```bash
+# Gas stations in Roraima → /mnt/disk1/export/amenity_fuel_RR.parquet
+python -m app.export_filter --uf RR --category amenity=fuel /mnt/disk1/export/
+
+# Supermarkets in São Paulo and Rio de Janeiro
+python -m app.export_filter --uf SP RJ --category shop=supermarket /mnt/disk1/sp_rj/
+
+# All amenity=* (restaurants, banks, pharmacies, hospitals…) in Amazonas
+python -m app.export_filter --uf AM --category amenity /mnt/disk1/am_amenities/
+
+# Hotels nationwide, CSV format
+python -m app.export_filter --category tourism=hotel --format csv /mnt/disk1/hotels/
+
+# Multiple output formats at once
+python -m app.export_filter --uf RR --category amenity=fuel --format parquet csv /mnt/disk1/export/
+```
+
+### By CNAE code directly
+
+```bash
+# By raw CNAE code (7 digits, no formatting)
+python -m app.export_filter --cnae 4731800 --uf SP /mnt/disk1/fuel_sp/
+
+# Multiple CNAE codes
+python -m app.export_filter --cnae 4711301 4711302 4712100 /mnt/disk1/markets/
+```
+
+### Count without exporting
+
+```bash
+# How many active gas stations in Brazil?
+python -m app.export_filter --category amenity=fuel --count
+
+# How many POIs in Roraima?
+python -m app.export_filter --uf RR --count
+```
+
+### Output filename convention
+
+The output file is named automatically from the applied filters:
+
+| Filters | Output filename |
+|---------|----------------|
+| `--category amenity=fuel --uf RR` | `amenity_fuel_RR.parquet` |
+| `--category shop=supermarket --uf SP RJ` | `shop_supermarket_RJ_SP.parquet` |
+| `--category tourism=hotel` | `tourism_hotel.parquet` |
+| *(no filters)* | `poi_export.parquet` |
+
+### Available OSM categories
+
+Key categories present in the dataset (see `app/cnae_osm_map.yaml` for the full list):
+
+| OSM Key | Values |
+|---------|--------|
+| `amenity` | `fuel`, `restaurant`, `fast_food`, `bar`, `bank`, `pharmacy`, `hospital`, `clinic`, `dentist`, `school`, `university`, `cinema`, `parking`, `car_wash`, `place_of_worship`, `police`, `bus_station`, `taxi`, `library`, `museum`, `laundry`, `nursing_home`, `veterinary`, `post_office` |
+| `shop` | `supermarket`, `convenience`, `bakery`, `butcher`, `seafood`, `clothes`, `shoes`, `jewelry`, `electronics`, `computer`, `hairdresser`, `beauty`, `optician`, `pet`, `florist`, `sports`, `books`, `hardware`, `furniture`, `car`, `car_repair`, `car_parts`, `motorcycle` |
+| `tourism` | `hotel`, `motel`, `hostel`, `guest_house`, `travel_agency` |
+| `leisure` | `fitness_centre`, `sports_centre`, `cinema`, `amusement_arcade`, `zoo` |
+| `office` | `lawyer`, `accountant`, `architect`, `engineer`, `real_estate`, `insurance`, `it`, `advertising` |
+| `craft` | `electrician`, `plumber`, `carpenter`, `shoemaker`, `jeweller`, `electronics_repair` |
+| `healthcare` | `physiotherapist`, `psychologist`, `nutritionist`, `rehabilitation` |
+
+Records with no CNAE mapping have `osm_category = null` and can be filtered with:
+```bash
+python -m app.export_filter --category amenity /mnt/disk1/  # only mapped amenity records
+```
+
+---
+
 ## Pipeline Steps
 
 | Step | Script | Input | Output |
