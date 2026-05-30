@@ -1,0 +1,36 @@
+# BR CNPJ → POI Pipeline — Non-sensitive configuration
+# Secrets (API keys, credentials) go in .env — not here.
+
+source:
+  base_url: "https://dados-abertos-rf-cnpj.casadosdados.com.br"
+
+paths:
+  input_dir: "data/input"
+  intermediate_dir: "data/intermediate"
+  cache_dir: "data/cache"
+  output_dir: "data/output"
+  log_dir: "logs"
+
+filters:
+  situacao_ativa: "02"
+  excluir_porte_mei: "05"        # MEI size code
+  excluir_natureza_mei: "2135"   # MEI legal nature code
+
+duckdb:
+  threads: 0           # 0 = all available cores
+  memory_limit: "24GB" # leave headroom on 32 GB machine
+
+download:
+  workers: 4
+  chunk_size_mb: 8
+  retry_attempts: 3
+  retry_backoff_seconds: 5
+
+output:
+  parquet_compression: "zstd"
+  parquet_row_group_size: 122880  # ~128 k rows
+  csv_compression: "gzip"
+
+file:
+  encoding: "latin1"
+  delimiter: ";"

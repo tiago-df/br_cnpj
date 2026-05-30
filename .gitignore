@@ -1,0 +1,20 @@
+.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# Data — large files, not versioned
+data/input/
+data/intermediate/
+data/cache/
+data/output/
+
+# Logs
+logs/
+
+# DuckDB temp files
+*.duckdb
+*.wal
