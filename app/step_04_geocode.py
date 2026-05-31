@@ -124,7 +124,7 @@ def _load_municipio_centroids(cache_dir: Path) -> pd.DataFrame:
 async def _fetch_cep(
     session: aiohttp.ClientSession,
     cep: str,
-    sem: asyncio.Semaphore,
+    sem: asyncio.Semaphore | None = None,
     retries: int = 3,
 ) -> dict:
     """Fetch a single CEP from BrasilAPI.
@@ -137,8 +137,7 @@ async def _fetch_cep(
     try:
         for attempt in range(retries):
             try:
-                async with sem:
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                         if resp.status == 200:
                             data = await resp.json(content_type=None)
                             coords = (data.get("location") or {}).get("coordinates") or {}
@@ -236,71 +235,97 @@ async def _fetch_all_ceps(
     cache_checkpoint: int = 100,
     output_checkpoint: int = 5_000,
 ) -> list[dict]:
-    """Fetch CEPs asynchronously.
+    """Fetch CEPs with a fixed worker-pool (not one task per CEP).
+
+    Using asyncio.Queue + N worker coroutines means only N tasks exist at
+    any time.  Ctrl+C cancels N tasks (fast) instead of 400K+ tasks (slow).
 
     Checkpoints:
       - CEP cache saved every `cache_checkpoint` new results.
-      - Final geocoded parquet rebuilt every `output_checkpoint` new results,
-        so the output is usable at any point during the long fetch phase.
+      - Final geocoded parquet rebuilt every `output_checkpoint` new results.
     """
-    sem = asyncio.Semaphore(workers)
-    connector = aiohttp.TCPConnector(limit=workers, ssl=False)
-
     # Resume from existing cache
     if cache_path.exists():
         existing     = _parquet_read(cache_path)
-        already_done = {r["cep"]: r for r in existing.to_dict("records")}
+        already_done = {r["cep"] for r in existing.to_dict("records")}
+        results: list[dict] = existing.to_dict("records")
     else:
-        already_done: dict = {}
+        already_done: set = set()
+        results = []
 
     remaining = [c for c in ceps if c not in already_done]
-    results   = list(already_done.values())
+    if not remaining:
+        return results
+
+    queue: asyncio.Queue = asyncio.Queue()
+    for cep in remaining:
+        queue.put_nowait(cep)
+
     since_cache_save   = 0
     since_output_write = 0
+    pbar = atqdm(total=len(remaining), desc="  BrasilAPI CEP",
+                 initial=len(already_done))
 
-    try:
-        async with aiohttp.ClientSession(connector=connector) as session:
-            tasks = [_fetch_cep(session, cep, sem) for cep in remaining]
+    connector = aiohttp.TCPConnector(limit=workers, ssl=False)
 
-            for coro in atqdm(asyncio.as_completed(tasks), total=len(remaining),
-                              desc="  BrasilAPI CEP", initial=len(already_done)):
-                try:
-                    row = await coro
-                except asyncio.CancelledError:
-                    break   # Ctrl+C — exit loop, fall through to finally
+    async def _worker(session: aiohttp.ClientSession) -> None:
+        nonlocal since_cache_save, since_output_write
+        while True:
+            try:
+                cep = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            try:
+                row = await _fetch_cep(session, cep)
+            except asyncio.CancelledError:
+                queue.put_nowait(cep)   # put back so it's retried next run
+                raise
+            finally:
+                pbar.update(1)
 
-                # Only accumulate cacheable results (skip transient errors)
-                if not row.get("transient_error"):
-                    results.append({"cep": row["cep"], "lat": row["lat"], "lon": row["lon"]})
-                    since_cache_save   += 1
-                    since_output_write += 1
+            if not row.get("transient_error"):
+                results.append({"cep": row["cep"], "lat": row["lat"], "lon": row["lon"]})
+                since_cache_save   += 1
+                since_output_write += 1
 
-                # ── Cache checkpoint ──────────────────────────────────────
-                if since_cache_save >= cache_checkpoint:
-                    df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+            # ── Cache checkpoint ──────────────────────────────────────────
+            if since_cache_save >= cache_checkpoint:
+                df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+                _parquet_write(df, cache_path)
+                since_cache_save = 0
+
+            # ── Output checkpoint ─────────────────────────────────────────
+            if since_output_write >= output_checkpoint:
+                df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+                if since_cache_save > 0:
                     _parquet_write(df, cache_path)
                     since_cache_save = 0
+                log.info("    Checkpoint: rebuilding output (%d/%d CEPs)…",
+                         len(results), len(ceps))
+                _write_partial_output(df, joined_path, geocoded_out,
+                                      compression, row_group)
+                since_output_write = 0
 
-                # ── Output checkpoint ─────────────────────────────────────
-                if since_output_write >= output_checkpoint:
-                    df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
-                    if since_cache_save > 0:
-                        _parquet_write(df, cache_path)
-                        since_cache_save = 0
-                    log.info("    Checkpoint: rebuilding output (%d/%d CEPs)…",
-                             len(results), len(ceps))
-                    _write_partial_output(df, joined_path, geocoded_out, compression, row_group)
-                    since_output_write = 0
+    worker_tasks: list[asyncio.Task] = []
+    try:
+        async with aiohttp.ClientSession(connector=connector) as session:
+            worker_tasks = [
+                asyncio.create_task(_worker(session)) for _ in range(workers)
+            ]
+            await asyncio.gather(*worker_tasks, return_exceptions=True)
 
     except (asyncio.CancelledError, KeyboardInterrupt):
-        pass  # handled in finally
+        for t in worker_tasks:
+            t.cancel()
+        await asyncio.gather(*worker_tasks, return_exceptions=True)
 
     finally:
-        # Always flush on exit — clean finish or Ctrl+C
+        pbar.close()
+        # Always flush on any exit path (clean, Ctrl+C, exception)
         if results:
             df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
             _parquet_write(df, cache_path)
-            log.info("    Cache saved: %d entries (including pre-existing)", len(df))
+            log.info("    Cache saved: %d entries", len(df))
 
     return results
 
