@@ -29,14 +29,22 @@ Reads
 
 Writes
 ------
-  data/intermediate/step_04_geocoded_<dump_date>.parquet
+  data/intermediate/step_04_geocoded_<dump_date>.parquet          (full run)
+  data/intermediate/step_04_geocoded_<dump_date>__<slug>.parquet  (filtered run)
     All step_02 columns + lat (DOUBLE) + lon (DOUBLE) + geo_precision (VARCHAR)
+
+Filtering
+---------
+  Pass geocode_categories=["amenity=hospital"] to restrict geocoding to a
+  subset of POIs for testing.  The output is written to a separate file so
+  it never overwrites the full-run result.
 """
 
 import asyncio
 import logging
 import math
 import os
+import re
 import time
 from pathlib import Path
 
@@ -51,7 +59,8 @@ from app.config_loader import get_config
 
 log = logging.getLogger(__name__)
 
-GEOCODED_OUT   = "step_04_geocoded_{date}.parquet"
+GEOCODED_OUT      = "step_04_geocoded_{date}.parquet"
+GEOCODED_OUT_FILT = "step_04_geocoded_{date}__{slug}.parquet"
 CEP_CACHE_FILE = "cep_brasilapi.parquet"
 TT_CACHE_FILE  = "tomtom_{date}.parquet"
 MUNI_CACHE_FILE = "municipio_centroids.parquet"
@@ -423,8 +432,19 @@ def _geocode_tomtom(
 
 # ── Step entry point ─────────────────────────────────────────────────────────
 
-def output_exists(intermediate_dir: Path, dump_date: str) -> bool:
-    return (intermediate_dir / GEOCODED_OUT.format(date=dump_date)).exists()
+def _category_slug(categories: list[str]) -> str:
+    """Turn ['amenity=hospital', 'amenity=clinic'] into 'amenity=hospital_amenity=clinic'."""
+    return "_".join(re.sub(r"[^\w=]", "-", c) for c in sorted(categories))
+
+
+def output_exists(intermediate_dir: Path, dump_date: str,
+                  geocode_categories: list[str] | None = None) -> bool:
+    fname = (
+        GEOCODED_OUT_FILT.format(date=dump_date, slug=_category_slug(geocode_categories))
+        if geocode_categories
+        else GEOCODED_OUT.format(date=dump_date)
+    )
+    return (intermediate_dir / fname).exists()
 
 
 def run(
@@ -432,9 +452,15 @@ def run(
     cache_dir: Path,
     dump_date: str,
     force: bool = False,
+    geocode_categories: list[str] | None = None,
 ) -> Path:
     """Geocode POIs from step_02 → enriched Parquet with lat/lon.  Returns output path."""
-    geocoded_out = intermediate_dir / GEOCODED_OUT.format(date=dump_date)
+    if geocode_categories:
+        slug = _category_slug(geocode_categories)
+        geocoded_out = intermediate_dir / GEOCODED_OUT_FILT.format(date=dump_date, slug=slug)
+        log.info("  Filtered geocoding — categories: %s", geocode_categories)
+    else:
+        geocoded_out = intermediate_dir / GEOCODED_OUT.format(date=dump_date)
 
     if not force and geocoded_out.exists():
         log.info("Step 4 already done — skipping (use --force to reprocess)")
@@ -465,17 +491,24 @@ def run(
     t0 = time.perf_counter()
     log.info("Step 4 — Geocoding POIs…")
 
-    # ── Load lightweight subset of POI table ────────────────────────────────
+    # ── Load address fields (optionally filtered by osm_category) ────────────
     log.info("  Loading address fields from step_02 output…")
     con = duckdb.connect(":memory:")
+    if geocode_categories:
+        cat_list = ", ".join(f"'{c}'" for c in geocode_categories)
+        where    = f"WHERE osm_category IN ({cat_list})"
+    else:
+        where = ""
     df = con.execute(f"""
         SELECT cnpj, tipo_logradouro, logradouro, numero,
                bairro, cep, municipio, municipio_descricao, uf
         FROM '{joined_path}'
+        {where}
     """).df()
     con.close()
     n_total = len(df)
-    log.info("  %s POIs loaded", f"{n_total:,}")
+    log.info("  %s POIs loaded%s", f"{n_total:,}",
+             f" (category filter: {geocode_categories})" if geocode_categories else "")
 
     # Normalise CEP: digits only, zero-padded to 8
     df["cep_clean"] = (
@@ -589,9 +622,15 @@ def run(
     for prec, cnt in df["geo_precision"].value_counts().items():
         log.info("    %-32s %s  (%.1f%%)", prec, f"{cnt:,}", 100.0 * cnt / n_total)
 
-    # ── Write output: merge geo columns into full POI table ──────────────────
+    # ── Write output: merge geo columns into POI table ───────────────────────
     log.info("Step 4 — Writing output…")
     geo_cols = df[["cnpj", "lat", "lon", "geo_precision"]].copy()
+
+    if geocode_categories:
+        cat_list  = ", ".join(f"'{c}'" for c in geocode_categories)
+        poi_where = f"WHERE p.osm_category IN ({cat_list})"
+    else:
+        poi_where = ""
 
     con2 = duckdb.connect(":memory:")
     con2.register("geo_cols", geo_cols)
@@ -600,6 +639,7 @@ def run(
             SELECT p.*, g.lat, g.lon, g.geo_precision
             FROM '{joined_path}' p
             LEFT JOIN geo_cols g USING (cnpj)
+            {poi_where}
         ) TO '{geocoded_out}'
         (FORMAT PARQUET, COMPRESSION '{compression}', ROW_GROUP_SIZE {row_group})
     """)
