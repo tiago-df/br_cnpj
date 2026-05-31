@@ -171,27 +171,34 @@ async def _fetch_cep(
     return {"cep": cep, "lat": None, "lon": None, "transient_error": True}
 
 
-import threading as _threading
+# Module-level stop flag — set by SIGINT handler, checked by all workers.
+# Using a module-level variable avoids any Python closure-capture subtleties.
+_STOP_REQUESTED: bool = False
 
-def _run_async(coro_factory, stop_flag: _threading.Event) -> list:
+
+def _run_async(coro_factory) -> list:
     """Run an async coroutine with a SIGINT handler that sets a stop flag.
 
     Workers check the flag before each new request and exit cleanly after
     finishing their current in-flight request (≤10 s).  No task cancellation
     is needed, so there is no asyncio cleanup hang.
     """
+    global _STOP_REQUESTED
+    _STOP_REQUESTED = False
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     def _sigint_handler(sig, frame):
+        global _STOP_REQUESTED
         log.warning("    Interrupted — finishing in-flight requests and saving cache…")
-        stop_flag.set()
+        _STOP_REQUESTED = True
 
     old_handler = signal.signal(signal.SIGINT, _sigint_handler)
     try:
         return loop.run_until_complete(coro_factory)
     except (KeyboardInterrupt, asyncio.CancelledError):
-        stop_flag.set()
+        _STOP_REQUESTED = True
         return []
     finally:
         signal.signal(signal.SIGINT, old_handler)
@@ -260,7 +267,6 @@ async def _fetch_all_ceps(
     geocoded_out: Path,
     compression: str,
     row_group: int,
-    stop_flag: _threading.Event,
     cache_checkpoint: int = 100,
     output_checkpoint: int = 5_000,
 ) -> list[dict]:
@@ -296,7 +302,7 @@ async def _fetch_all_ceps(
 
     async def _worker(session: aiohttp.ClientSession) -> None:
         nonlocal since_cache_save, since_output_write
-        while not stop_flag.is_set():
+        while not _STOP_REQUESTED:
             try:
                 cep = queue.get_nowait()
             except asyncio.QueueEmpty:
@@ -372,14 +378,12 @@ def _geocode_ceps(
             "    Fetching %d new CEPs (workers=%d, cache every %d, output every %d)…",
             len(to_fetch), workers, cache_checkpoint, output_checkpoint,
         )
-        stop_flag = _threading.Event()
         all_rows = _run_async(
             _fetch_all_ceps(
                 unique_ceps, workers, cache_path,
                 joined_path, geocoded_out, compression, row_group,
-                stop_flag, cache_checkpoint, output_checkpoint,
+                cache_checkpoint, output_checkpoint,
             ),
-            stop_flag,
         )
         combined = pd.DataFrame(all_rows, columns=["cep", "lat", "lon"]) if all_rows else _parquet_read(cache_path)
         log.info("    CEP cache: %d total entries", len(combined))
