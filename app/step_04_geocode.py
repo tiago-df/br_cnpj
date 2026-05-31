@@ -93,7 +93,7 @@ def _load_municipio_centroids(cache_dir: Path) -> pd.DataFrame:
     cache_path = cache_dir / MUNI_CACHE_FILE
     if cache_path.exists():
         log.info("    Municipality centroids: loading from cache…")
-        return pd.read_parquet(cache_path)
+        return _parquet_read(cache_path)
 
     log.info("    Municipality centroids: downloading via geobr (one-time)…")
     import geobr  # heavy import — only on first run
@@ -105,7 +105,7 @@ def _load_municipio_centroids(cache_dir: Path) -> pd.DataFrame:
         "lat_centro": centroids.y.values,
         "lon_centro": centroids.x.values,
     })
-    df.to_parquet(cache_path, index=False)
+    _parquet_write(df, cache_path)
     log.info("    Cached %d municipality centroids → %s", len(df), MUNI_CACHE_FILE)
     return df
 
@@ -146,22 +146,70 @@ async def _fetch_cep(
     return {"cep": cep, "lat": None, "lon": None}
 
 
-async def _fetch_all_ceps(ceps: list[str], workers: int) -> list[dict]:
+def _parquet_write(df: pd.DataFrame, path: Path) -> None:
+    """Write DataFrame to Parquet using DuckDB (no pyarrow dependency)."""
+    con = duckdb.connect()
+    con.register("_df", df)
+    con.execute(f"COPY _df TO '{path}' (FORMAT PARQUET, COMPRESSION 'zstd')")
+    con.close()
+
+
+def _parquet_read(path: Path) -> pd.DataFrame:
+    """Read Parquet using DuckDB (no pyarrow dependency)."""
+    con = duckdb.connect()
+    df = con.execute(f"SELECT * FROM read_parquet('{path}')").df()
+    con.close()
+    return df
+
+
+async def _fetch_all_ceps(
+    ceps: list[str], workers: int, cache_path: Path,
+    checkpoint_every: int = 10_000,
+) -> list[dict]:
+    """Fetch CEPs asynchronously with incremental checkpointing every N results."""
     sem = asyncio.Semaphore(workers)
     connector = aiohttp.TCPConnector(limit=workers, ssl=False)
+
+    # Load existing checkpoint if present
+    if cache_path.exists():
+        existing = _parquet_read(cache_path)
+        already_done = {r["cep"]: r for r in existing.to_dict("records")}
+    else:
+        already_done: dict = {}
+
+    remaining = [c for c in ceps if c not in already_done]
+    results   = list(already_done.values())
+
     async with aiohttp.ClientSession(connector=connector) as session:
-        tasks = [_fetch_cep(session, cep, sem) for cep in ceps]
-        results = []
-        for coro in atqdm(asyncio.as_completed(tasks), total=len(tasks), desc="  BrasilAPI CEP"):
-            results.append(await coro)
+        tasks   = [_fetch_cep(session, cep, sem) for cep in remaining]
+        pending = list(asyncio.as_completed(tasks))
+        batch: list[dict] = []
+
+        for i, coro in enumerate(atqdm(pending, total=len(pending), desc="  BrasilAPI CEP")):
+            row = await coro
+            results.append(row)
+            batch.append(row)
+
+            if len(batch) >= checkpoint_every:
+                combined = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+                _parquet_write(combined, cache_path)
+                batch.clear()
+
+    # Final save
+    if batch or not cache_path.exists():
+        combined = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+        _parquet_write(combined, cache_path)
+
     return results
 
 
 def _geocode_ceps(unique_ceps: list[str], cache_dir: Path, workers: int) -> pd.DataFrame:
     """Return DataFrame {cep, lat, lon} for all unique_ceps.  Uses/updates local cache."""
     cache_path = cache_dir / CEP_CACHE_FILE
+
+    # Check what's already cached
     if cache_path.exists():
-        cached = pd.read_parquet(cache_path)
+        cached = _parquet_read(cache_path)
         known  = set(cached["cep"].tolist())
     else:
         cached = pd.DataFrame(columns=["cep", "lat", "lon"])
@@ -169,11 +217,10 @@ def _geocode_ceps(unique_ceps: list[str], cache_dir: Path, workers: int) -> pd.D
 
     to_fetch = [c for c in unique_ceps if c not in known]
     if to_fetch:
-        log.info("    Fetching %d new CEPs (workers=%d)…", len(to_fetch), workers)
-        new_rows = asyncio.run(_fetch_all_ceps(to_fetch, workers))
-        new_df   = pd.DataFrame(new_rows, columns=["cep", "lat", "lon"])
-        combined = pd.concat([cached, new_df], ignore_index=True)
-        combined.to_parquet(cache_path, index=False)
+        log.info("    Fetching %d new CEPs (workers=%d, checkpoint every 10k)…",
+                 len(to_fetch), workers)
+        all_rows = asyncio.run(_fetch_all_ceps(to_fetch, workers, cache_path))
+        combined = pd.DataFrame(all_rows, columns=["cep", "lat", "lon"])
         log.info("    CEP cache: %d total entries", len(combined))
     else:
         combined = cached
@@ -272,7 +319,7 @@ def _geocode_tomtom(
     """Return DataFrame {cnpj, lat, lon, geo_precision} for fallback records."""
     cache_path = cache_dir / TT_CACHE_FILE.format(date=dump_date)
     if cache_path.exists():
-        cached     = pd.read_parquet(cache_path)
+        cached     = _parquet_read(cache_path)
         known_cnpj = set(cached["cnpj"].tolist())
     else:
         cached     = pd.DataFrame(columns=["cnpj", "lat", "lon", "geo_precision"])
@@ -291,7 +338,7 @@ def _geocode_tomtom(
     new_results = asyncio.run(_fetch_all_tomtom(rows, api_key, workers))
     new_df      = pd.DataFrame(new_results)
     combined    = pd.concat([cached, new_df], ignore_index=True)
-    combined.to_parquet(cache_path, index=False)
+    _parquet_write(combined, cache_path)
     log.info("    TomTom cache: %d total entries", len(combined))
     return combined[combined["cnpj"].isin(set(df_fallback["cnpj"].tolist()))].copy()
 
