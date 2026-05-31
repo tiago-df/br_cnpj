@@ -171,37 +171,30 @@ async def _fetch_cep(
     return {"cep": cep, "lat": None, "lon": None, "transient_error": True}
 
 
-def _run_async(coro) -> list:
-    """Run an async coroutine with a graceful SIGINT handler.
+import threading as _threading
 
-    Python 3.12's asyncio.Runner._on_sigint raises KeyboardInterrupt directly
-    into the event loop, bypassing all finally blocks.  We replace the SIGINT
-    handler with one that cancels the main task cleanly, giving coroutines a
-    chance to flush caches before exiting.
+def _run_async(coro_factory, stop_flag: _threading.Event) -> list:
+    """Run an async coroutine with a SIGINT handler that sets a stop flag.
+
+    Workers check the flag before each new request and exit cleanly after
+    finishing their current in-flight request (≤10 s).  No task cancellation
+    is needed, so there is no asyncio cleanup hang.
     """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    main_task: asyncio.Task | None = None
 
     def _sigint_handler(sig, frame):
-        log.warning("    Interrupted — flushing cache and exiting…")
-        if main_task and not main_task.done():
-            loop.call_soon_threadsafe(main_task.cancel)
+        log.warning("    Interrupted — finishing in-flight requests and saving cache…")
+        stop_flag.set()
 
     old_handler = signal.signal(signal.SIGINT, _sigint_handler)
     try:
-        main_task = loop.create_task(coro)
-        return loop.run_until_complete(main_task)
-    except asyncio.CancelledError:
+        return loop.run_until_complete(coro_factory)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        stop_flag.set()
         return []
     finally:
         signal.signal(signal.SIGINT, old_handler)
-        # Cancel and await any remaining tasks so the loop closes cleanly
-        pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
-        for t in pending:
-            t.cancel()
-        if pending:
-            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         loop.close()
 
 
@@ -267,17 +260,15 @@ async def _fetch_all_ceps(
     geocoded_out: Path,
     compression: str,
     row_group: int,
+    stop_flag: _threading.Event,
     cache_checkpoint: int = 100,
     output_checkpoint: int = 5_000,
 ) -> list[dict]:
-    """Fetch CEPs with a fixed worker-pool (not one task per CEP).
+    """Fetch CEPs with a fixed worker-pool (asyncio.Queue + N coroutines).
 
-    Using asyncio.Queue + N worker coroutines means only N tasks exist at
-    any time.  Ctrl+C cancels N tasks (fast) instead of 400K+ tasks (slow).
-
-    Checkpoints:
-      - CEP cache saved every `cache_checkpoint` new results.
-      - Final geocoded parquet rebuilt every `output_checkpoint` new results.
+    Graceful shutdown: when stop_flag is set (Ctrl+C), each worker finishes
+    its current in-flight request (≤10 s) then exits — no task cancellation,
+    no asyncio cleanup hang.
     """
     # Resume from existing cache
     if cache_path.exists():
@@ -298,25 +289,21 @@ async def _fetch_all_ceps(
 
     since_cache_save   = 0
     since_output_write = 0
-    pbar = atqdm(total=len(remaining), desc="  BrasilAPI CEP",
+    pbar = atqdm(total=len(ceps), desc="  BrasilAPI CEP",
                  initial=len(already_done))
 
     connector = aiohttp.TCPConnector(limit=workers, ssl=False)
 
     async def _worker(session: aiohttp.ClientSession) -> None:
         nonlocal since_cache_save, since_output_write
-        while True:
+        while not stop_flag.is_set():
             try:
                 cep = queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            try:
-                row = await _fetch_cep(session, cep)
-            except asyncio.CancelledError:
-                queue.put_nowait(cep)   # put back so it's retried next run
-                raise
-            finally:
-                pbar.update(1)
+
+            row = await _fetch_cep(session, cep)
+            pbar.update(1)
 
             if not row.get("transient_error"):
                 results.append({"cep": row["cep"], "lat": row["lat"], "lon": row["lon"]})
@@ -341,22 +328,15 @@ async def _fetch_all_ceps(
                                       compression, row_group)
                 since_output_write = 0
 
-    worker_tasks: list[asyncio.Task] = []
     try:
         async with aiohttp.ClientSession(connector=connector) as session:
             worker_tasks = [
                 asyncio.create_task(_worker(session)) for _ in range(workers)
             ]
             await asyncio.gather(*worker_tasks, return_exceptions=True)
-
-    except (asyncio.CancelledError, KeyboardInterrupt):
-        for t in worker_tasks:
-            t.cancel()
-        await asyncio.gather(*worker_tasks, return_exceptions=True)
-
     finally:
         pbar.close()
-        # Always flush on any exit path (clean, Ctrl+C, exception)
+        # Always flush — clean finish, Ctrl+C, or exception
         if results:
             df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
             _parquet_write(df, cache_path)
@@ -392,12 +372,16 @@ def _geocode_ceps(
             "    Fetching %d new CEPs (workers=%d, cache every %d, output every %d)…",
             len(to_fetch), workers, cache_checkpoint, output_checkpoint,
         )
-        all_rows = _run_async(_fetch_all_ceps(
-            to_fetch, workers, cache_path,
-            joined_path, geocoded_out, compression, row_group,
-            cache_checkpoint, output_checkpoint,
-        ))
-        combined = pd.DataFrame(all_rows, columns=["cep", "lat", "lon"])
+        stop_flag = _threading.Event()
+        all_rows = _run_async(
+            _fetch_all_ceps(
+                unique_ceps, workers, cache_path,
+                joined_path, geocoded_out, compression, row_group,
+                stop_flag, cache_checkpoint, output_checkpoint,
+            ),
+            stop_flag,
+        )
+        combined = pd.DataFrame(all_rows, columns=["cep", "lat", "lon"]) if all_rows else _parquet_read(cache_path)
         log.info("    CEP cache: %d total entries", len(combined))
     else:
         combined = cached
