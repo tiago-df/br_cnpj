@@ -45,6 +45,7 @@ import logging
 import math
 import os
 import re
+import signal
 import time
 from pathlib import Path
 
@@ -168,6 +169,40 @@ async def _fetch_cep(
     # All retries exhausted due to network/server error → do NOT cache
     log.debug("BrasilAPI: transient error for CEP %s — will retry next run", cep)
     return {"cep": cep, "lat": None, "lon": None, "transient_error": True}
+
+
+def _run_async(coro) -> list:
+    """Run an async coroutine with a graceful SIGINT handler.
+
+    Python 3.12's asyncio.Runner._on_sigint raises KeyboardInterrupt directly
+    into the event loop, bypassing all finally blocks.  We replace the SIGINT
+    handler with one that cancels the main task cleanly, giving coroutines a
+    chance to flush caches before exiting.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    main_task: asyncio.Task | None = None
+
+    def _sigint_handler(sig, frame):
+        log.warning("    Interrupted — flushing cache and exiting…")
+        if main_task and not main_task.done():
+            loop.call_soon_threadsafe(main_task.cancel)
+
+    old_handler = signal.signal(signal.SIGINT, _sigint_handler)
+    try:
+        main_task = loop.create_task(coro)
+        return loop.run_until_complete(main_task)
+    except asyncio.CancelledError:
+        return []
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
+        # Cancel and await any remaining tasks so the loop closes cleanly
+        pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+        for t in pending:
+            t.cancel()
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        loop.close()
 
 
 def _parquet_write(df: pd.DataFrame, path: Path) -> None:
@@ -357,7 +392,7 @@ def _geocode_ceps(
             "    Fetching %d new CEPs (workers=%d, cache every %d, output every %d)…",
             len(to_fetch), workers, cache_checkpoint, output_checkpoint,
         )
-        all_rows = asyncio.run(_fetch_all_ceps(
+        all_rows = _run_async(_fetch_all_ceps(
             to_fetch, workers, cache_path,
             joined_path, geocoded_out, compression, row_group,
             cache_checkpoint, output_checkpoint,
@@ -486,7 +521,7 @@ def _geocode_tomtom(
     rows = to_fetch[[c for c in needed_cols if c in to_fetch.columns]].to_dict("records")
     log.info("    TomTom: fetching %d records (workers=%d)…", len(rows), workers)
 
-    new_results = asyncio.run(_fetch_all_tomtom(rows, api_key, workers))
+    new_results = _run_async(_fetch_all_tomtom(rows, api_key, workers))
     # Exclude transient errors from cache so they are retried next run
     cacheable   = [r for r in new_results if r.get("geo_precision") not in _TT_TRANSIENT]
     transient_n = len(new_results) - len(cacheable)
