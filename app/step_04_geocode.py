@@ -162,52 +162,124 @@ def _parquet_read(path: Path) -> pd.DataFrame:
     return df
 
 
+def _write_partial_output(
+    cache_df: pd.DataFrame,
+    joined_path: Path,
+    geocoded_out: Path,
+    compression: str,
+    row_group: int,
+) -> None:
+    """Join current CEP cache with full POI table and write partial geocoded output.
+
+    Records not yet in cache get lat=NULL, lon=NULL, geo_precision='pending'.
+    This makes the output file usable at any point during the fetch phase.
+    """
+    con = duckdb.connect()
+    con.register("cep_cache", cache_df)
+    con.execute(f"""
+        COPY (
+            SELECT
+                p.*,
+                g.lat,
+                g.lon,
+                CASE
+                    WHEN g.lat IS NOT NULL THEN 'cep'
+                    WHEN g.cep IS NOT NULL THEN 'none'
+                    ELSE 'pending'
+                END AS geo_precision
+            FROM read_parquet('{joined_path}') p
+            LEFT JOIN (
+                SELECT
+                    lpad(regexp_replace(cep, '[^0-9]', '', 'g'), 8, '0') AS cep_clean,
+                    lat, lon, cep
+                FROM cep_cache
+            ) g ON lpad(regexp_replace(p.cep, '[^0-9]', '', 'g'), 8, '0') = g.cep_clean
+        ) TO '{geocoded_out}'
+        (FORMAT PARQUET, COMPRESSION '{compression}', ROW_GROUP_SIZE {row_group})
+    """)
+    con.close()
+
+
 async def _fetch_all_ceps(
-    ceps: list[str], workers: int, cache_path: Path,
-    checkpoint_every: int = 10_000,
+    ceps: list[str],
+    workers: int,
+    cache_path: Path,
+    joined_path: Path,
+    geocoded_out: Path,
+    compression: str,
+    row_group: int,
+    cache_checkpoint: int = 100,
+    output_checkpoint: int = 5_000,
 ) -> list[dict]:
-    """Fetch CEPs asynchronously with incremental checkpointing every N results."""
+    """Fetch CEPs asynchronously.
+
+    Checkpoints:
+      - CEP cache saved every `cache_checkpoint` new results.
+      - Final geocoded parquet rebuilt every `output_checkpoint` new results,
+        so the output is usable at any point during the long fetch phase.
+    """
     sem = asyncio.Semaphore(workers)
     connector = aiohttp.TCPConnector(limit=workers, ssl=False)
 
-    # Load existing checkpoint if present
+    # Resume from existing cache
     if cache_path.exists():
-        existing = _parquet_read(cache_path)
+        existing     = _parquet_read(cache_path)
         already_done = {r["cep"]: r for r in existing.to_dict("records")}
     else:
         already_done: dict = {}
 
     remaining = [c for c in ceps if c not in already_done]
     results   = list(already_done.values())
+    since_cache_save   = 0
+    since_output_write = 0
 
     async with aiohttp.ClientSession(connector=connector) as session:
-        tasks   = [_fetch_cep(session, cep, sem) for cep in remaining]
-        pending = list(asyncio.as_completed(tasks))
-        batch: list[dict] = []
+        tasks = [_fetch_cep(session, cep, sem) for cep in remaining]
 
-        for i, coro in enumerate(atqdm(pending, total=len(pending), desc="  BrasilAPI CEP")):
+        for coro in atqdm(asyncio.as_completed(tasks), total=len(remaining),
+                          desc="  BrasilAPI CEP", initial=len(already_done)):
             row = await coro
             results.append(row)
-            batch.append(row)
+            since_cache_save   += 1
+            since_output_write += 1
 
-            if len(batch) >= checkpoint_every:
-                combined = pd.DataFrame(results, columns=["cep", "lat", "lon"])
-                _parquet_write(combined, cache_path)
-                batch.clear()
+            # ── Cache checkpoint ──────────────────────────────────────────
+            if since_cache_save >= cache_checkpoint:
+                df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+                _parquet_write(df, cache_path)
+                since_cache_save = 0
 
-    # Final save
-    if batch or not cache_path.exists():
-        combined = pd.DataFrame(results, columns=["cep", "lat", "lon"])
-        _parquet_write(combined, cache_path)
+            # ── Output checkpoint ─────────────────────────────────────────
+            if since_output_write >= output_checkpoint:
+                df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+                if since_cache_save > 0:          # ensure cache is fresh too
+                    _parquet_write(df, cache_path)
+                    since_cache_save = 0
+                log.info("    Checkpoint: rebuilding output (%d/%d CEPs)…",
+                         len(results), len(ceps))
+                _write_partial_output(df, joined_path, geocoded_out, compression, row_group)
+                since_output_write = 0
 
+    # ── Final save ────────────────────────────────────────────────────────
+    df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+    _parquet_write(df, cache_path)
     return results
 
 
-def _geocode_ceps(unique_ceps: list[str], cache_dir: Path, workers: int) -> pd.DataFrame:
-    """Return DataFrame {cep, lat, lon} for all unique_ceps.  Uses/updates local cache."""
+def _geocode_ceps(
+    unique_ceps: list[str],
+    cache_dir: Path,
+    workers: int,
+    joined_path: Path,
+    geocoded_out: Path,
+    compression: str,
+    row_group: int,
+    cache_checkpoint: int = 100,
+    output_checkpoint: int = 5_000,
+) -> pd.DataFrame:
+    """Return DataFrame {cep, lat, lon} for all unique_ceps. Uses/updates local cache."""
     cache_path = cache_dir / CEP_CACHE_FILE
 
-    # Check what's already cached
     if cache_path.exists():
         cached = _parquet_read(cache_path)
         known  = set(cached["cep"].tolist())
@@ -217,9 +289,15 @@ def _geocode_ceps(unique_ceps: list[str], cache_dir: Path, workers: int) -> pd.D
 
     to_fetch = [c for c in unique_ceps if c not in known]
     if to_fetch:
-        log.info("    Fetching %d new CEPs (workers=%d, checkpoint every 10k)…",
-                 len(to_fetch), workers)
-        all_rows = asyncio.run(_fetch_all_ceps(to_fetch, workers, cache_path))
+        log.info(
+            "    Fetching %d new CEPs (workers=%d, cache every %d, output every %d)…",
+            len(to_fetch), workers, cache_checkpoint, output_checkpoint,
+        )
+        all_rows = asyncio.run(_fetch_all_ceps(
+            to_fetch, workers, cache_path,
+            joined_path, geocoded_out, compression, row_group,
+            cache_checkpoint, output_checkpoint,
+        ))
         combined = pd.DataFrame(all_rows, columns=["cep", "lat", "lon"])
         log.info("    CEP cache: %d total entries", len(combined))
     else:
@@ -369,10 +447,12 @@ def run(
 
     cfg       = get_config()
     geo_cfg   = cfg.get("geocoding", {})
-    cep_workers  = int(geo_cfg.get("cep_workers", 20))
-    tt_workers   = int(geo_cfg.get("tomtom_workers", 10))
-    city_thresh  = float(geo_cfg.get("city_center_threshold_m", 500))
-    tt_enabled   = bool(geo_cfg.get("tomtom_enabled", True))
+    cep_workers       = int(geo_cfg.get("cep_workers", 20))
+    tt_workers        = int(geo_cfg.get("tomtom_workers", 10))
+    city_thresh       = float(geo_cfg.get("city_center_threshold_m", 500))
+    tt_enabled        = bool(geo_cfg.get("tomtom_enabled", True))
+    cache_checkpoint  = int(geo_cfg.get("cep_cache_checkpoint", 100))
+    output_checkpoint = int(geo_cfg.get("cep_output_checkpoint", 5_000))
     compression  = cfg["output"]["parquet_compression"]
     row_group    = cfg["output"]["parquet_row_group_size"]
 
@@ -410,7 +490,15 @@ def run(
 
     # ── Phase A: BrasilAPI CEP lookup ────────────────────────────────────────
     log.info("Step 4 — Phase A: BrasilAPI CEP geocoding…")
-    cep_df = _geocode_ceps(unique_ceps, cache_dir, cep_workers)
+    cep_df = _geocode_ceps(
+        unique_ceps, cache_dir, cep_workers,
+        joined_path=joined_path,
+        geocoded_out=geocoded_out,
+        compression=compression,
+        row_group=row_group,
+        cache_checkpoint=cache_checkpoint,
+        output_checkpoint=output_checkpoint,
+    )
 
     df = df.merge(
         cep_df[["cep", "lat", "lon"]].rename(columns={"cep": "cep_clean"}),
