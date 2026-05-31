@@ -127,6 +127,12 @@ async def _fetch_cep(
     sem: asyncio.Semaphore,
     retries: int = 3,
 ) -> dict:
+    """Fetch a single CEP from BrasilAPI.
+
+    Returns dict with keys: cep, lat, lon, transient_error.
+    transient_error=True means the result must NOT be cached (network/quota
+    failure) so the CEP is retried on the next run.
+    """
     url = BRASILAPI_URL.format(cep=cep)
     for attempt in range(retries):
         try:
@@ -140,9 +146,11 @@ async def _fetch_cep(
                             lon = float(coords["longitude"]) if coords.get("longitude") else None
                         except (TypeError, ValueError):
                             lat, lon = None, None
-                        return {"cep": cep, "lat": lat, "lon": lon}
+                        # Valid response (even if no coords) → cache it
+                        return {"cep": cep, "lat": lat, "lon": lon, "transient_error": False}
                     elif resp.status == 404:
-                        return {"cep": cep, "lat": None, "lon": None}
+                        # CEP does not exist → cache as no-coords
+                        return {"cep": cep, "lat": None, "lon": None, "transient_error": False}
                     elif resp.status == 429:
                         await asyncio.sleep(2.0 ** attempt)
                     else:
@@ -152,7 +160,9 @@ async def _fetch_cep(
         except Exception as exc:
             log.debug("BrasilAPI error for CEP %s (attempt %d): %s", cep, attempt, exc)
             await asyncio.sleep(1.0)
-    return {"cep": cep, "lat": None, "lon": None}
+    # All retries exhausted due to network/server error → do NOT cache
+    log.debug("BrasilAPI: transient error for CEP %s — will retry next run", cep)
+    return {"cep": cep, "lat": None, "lon": None, "transient_error": True}
 
 
 def _parquet_write(df: pd.DataFrame, path: Path) -> None:
@@ -248,9 +258,11 @@ async def _fetch_all_ceps(
         for coro in atqdm(asyncio.as_completed(tasks), total=len(remaining),
                           desc="  BrasilAPI CEP", initial=len(already_done)):
             row = await coro
-            results.append(row)
-            since_cache_save   += 1
-            since_output_write += 1
+            # Only accumulate cacheable results (skip transient errors)
+            if not row.get("transient_error"):
+                results.append({"cep": row["cep"], "lat": row["lat"], "lon": row["lon"]})
+                since_cache_save   += 1
+                since_output_write += 1
 
             # ── Cache checkpoint ──────────────────────────────────────────
             if since_cache_save >= cache_checkpoint:
@@ -318,6 +330,8 @@ def _geocode_ceps(
 
 # ── Phase C: TomTom structured geocoding ─────────────────────────────────────
 
+_TT_TRANSIENT = {"failed", "error"}   # geo_precision values that must NOT be cached
+
 async def _fetch_tomtom(
     session: aiohttp.ClientSession,
     row: dict,
@@ -325,6 +339,13 @@ async def _fetch_tomtom(
     sem: asyncio.Semaphore,
     retries: int = 3,
 ) -> dict:
+    """Fetch structured geocode from TomTom.
+
+    geo_precision values:
+      tomtom_*           → valid result, cache it
+      none               → API returned 200 but no results, cache it (won't improve)
+      failed / error     → transient failure, do NOT cache (retry next run)
+    """
     cnpj = row["cnpj"]
     params: dict = {
         "key":         api_key,
@@ -423,8 +444,15 @@ def _geocode_tomtom(
     log.info("    TomTom: fetching %d records (workers=%d)…", len(rows), workers)
 
     new_results = asyncio.run(_fetch_all_tomtom(rows, api_key, workers))
-    new_df      = pd.DataFrame(new_results)
-    combined    = pd.concat([cached, new_df], ignore_index=True)
+    # Exclude transient errors from cache so they are retried next run
+    cacheable   = [r for r in new_results if r.get("geo_precision") not in _TT_TRANSIENT]
+    transient_n = len(new_results) - len(cacheable)
+    if transient_n:
+        log.warning("    TomTom: %d transient errors excluded from cache — will retry next run",
+                    transient_n)
+    new_df   = pd.DataFrame(cacheable) if cacheable else pd.DataFrame(
+        columns=["cnpj", "lat", "lon", "geo_precision"])
+    combined = pd.concat([cached, new_df], ignore_index=True)
     _parquet_write(combined, cache_path)
     log.info("    TomTom cache: %d total entries", len(combined))
     return combined[combined["cnpj"].isin(set(df_fallback["cnpj"].tolist()))].copy()
