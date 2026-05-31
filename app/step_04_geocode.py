@@ -538,6 +538,10 @@ def run(
         on="cep_clean", how="left",
     )
 
+    # Ensure lat/lon are float64 regardless of whether the merge produced object dtype
+    df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
+    df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
+
     cep_found = df["lat"].notna().sum()
     log.info(
         "  BrasilAPI: %s/%s POIs have coordinates (%.1f%%)",
@@ -604,8 +608,8 @@ def run(
                     on="cnpj", how="left",
                 )
                 update_mask = fallback_mask & df["lat_tt"].notna()
-                df.loc[update_mask, "lat"]           = df.loc[update_mask, "lat_tt"]
-                df.loc[update_mask, "lon"]           = df.loc[update_mask, "lon_tt"]
+                df.loc[update_mask, "lat"]           = pd.to_numeric(df.loc[update_mask, "lat_tt"], errors="coerce")
+                df.loc[update_mask, "lon"]           = pd.to_numeric(df.loc[update_mask, "lon_tt"], errors="coerce")
                 df.loc[update_mask, "geo_precision"] = df.loc[update_mask, "prec_tt"]
                 df.drop(columns=["lat_tt", "lon_tt", "prec_tt"], errors="ignore", inplace=True)
 
