@@ -134,32 +134,38 @@ async def _fetch_cep(
     failure) so the CEP is retried on the next run.
     """
     url = BRASILAPI_URL.format(cep=cep)
-    for attempt in range(retries):
-        try:
-            async with sem:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json(content_type=None)
-                        coords = (data.get("location") or {}).get("coordinates") or {}
-                        try:
-                            lat = float(coords["latitude"])  if coords.get("latitude")  else None
-                            lon = float(coords["longitude"]) if coords.get("longitude") else None
-                        except (TypeError, ValueError):
-                            lat, lon = None, None
-                        # Valid response (even if no coords) → cache it
-                        return {"cep": cep, "lat": lat, "lon": lon, "transient_error": False}
-                    elif resp.status == 404:
-                        # CEP does not exist → cache as no-coords
-                        return {"cep": cep, "lat": None, "lon": None, "transient_error": False}
-                    elif resp.status == 429:
-                        await asyncio.sleep(2.0 ** attempt)
-                    else:
-                        await asyncio.sleep(1.0)
-        except asyncio.TimeoutError:
-            await asyncio.sleep(1.0)
-        except Exception as exc:
-            log.debug("BrasilAPI error for CEP %s (attempt %d): %s", cep, attempt, exc)
-            await asyncio.sleep(1.0)
+    try:
+        for attempt in range(retries):
+            try:
+                async with sem:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json(content_type=None)
+                            coords = (data.get("location") or {}).get("coordinates") or {}
+                            try:
+                                lat = float(coords["latitude"])  if coords.get("latitude")  else None
+                                lon = float(coords["longitude"]) if coords.get("longitude") else None
+                            except (TypeError, ValueError):
+                                lat, lon = None, None
+                            # Valid response (even if no coords) → cache it
+                            return {"cep": cep, "lat": lat, "lon": lon, "transient_error": False}
+                        elif resp.status == 404:
+                            # CEP does not exist → cache as no-coords
+                            return {"cep": cep, "lat": None, "lon": None, "transient_error": False}
+                        elif resp.status == 429:
+                            await asyncio.sleep(2.0 ** attempt)
+                        else:
+                            await asyncio.sleep(1.0)
+            except asyncio.TimeoutError:
+                await asyncio.sleep(1.0)
+            except asyncio.CancelledError:
+                raise   # propagate immediately — don't retry, don't cache
+            except Exception as exc:
+                log.debug("BrasilAPI error for CEP %s (attempt %d): %s", cep, attempt, exc)
+                await asyncio.sleep(1.0)
+    except asyncio.CancelledError:
+        # Task was cancelled (e.g. Ctrl+C) — return as transient so it's not cached
+        return {"cep": cep, "lat": None, "lon": None, "transient_error": True}
     # All retries exhausted due to network/server error → do NOT cache
     log.debug("BrasilAPI: transient error for CEP %s — will retry next run", cep)
     return {"cep": cep, "lat": None, "lon": None, "transient_error": True}
@@ -252,38 +258,50 @@ async def _fetch_all_ceps(
     since_cache_save   = 0
     since_output_write = 0
 
-    async with aiohttp.ClientSession(connector=connector) as session:
-        tasks = [_fetch_cep(session, cep, sem) for cep in remaining]
+    try:
+        async with aiohttp.ClientSession(connector=connector) as session:
+            tasks = [_fetch_cep(session, cep, sem) for cep in remaining]
 
-        for coro in atqdm(asyncio.as_completed(tasks), total=len(remaining),
-                          desc="  BrasilAPI CEP", initial=len(already_done)):
-            row = await coro
-            # Only accumulate cacheable results (skip transient errors)
-            if not row.get("transient_error"):
-                results.append({"cep": row["cep"], "lat": row["lat"], "lon": row["lon"]})
-                since_cache_save   += 1
-                since_output_write += 1
+            for coro in atqdm(asyncio.as_completed(tasks), total=len(remaining),
+                              desc="  BrasilAPI CEP", initial=len(already_done)):
+                try:
+                    row = await coro
+                except asyncio.CancelledError:
+                    break   # Ctrl+C — exit loop, fall through to finally
 
-            # ── Cache checkpoint ──────────────────────────────────────────
-            if since_cache_save >= cache_checkpoint:
-                df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
-                _parquet_write(df, cache_path)
-                since_cache_save = 0
+                # Only accumulate cacheable results (skip transient errors)
+                if not row.get("transient_error"):
+                    results.append({"cep": row["cep"], "lat": row["lat"], "lon": row["lon"]})
+                    since_cache_save   += 1
+                    since_output_write += 1
 
-            # ── Output checkpoint ─────────────────────────────────────────
-            if since_output_write >= output_checkpoint:
-                df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
-                if since_cache_save > 0:          # ensure cache is fresh too
+                # ── Cache checkpoint ──────────────────────────────────────
+                if since_cache_save >= cache_checkpoint:
+                    df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
                     _parquet_write(df, cache_path)
                     since_cache_save = 0
-                log.info("    Checkpoint: rebuilding output (%d/%d CEPs)…",
-                         len(results), len(ceps))
-                _write_partial_output(df, joined_path, geocoded_out, compression, row_group)
-                since_output_write = 0
 
-    # ── Final save ────────────────────────────────────────────────────────
-    df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
-    _parquet_write(df, cache_path)
+                # ── Output checkpoint ─────────────────────────────────────
+                if since_output_write >= output_checkpoint:
+                    df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+                    if since_cache_save > 0:
+                        _parquet_write(df, cache_path)
+                        since_cache_save = 0
+                    log.info("    Checkpoint: rebuilding output (%d/%d CEPs)…",
+                             len(results), len(ceps))
+                    _write_partial_output(df, joined_path, geocoded_out, compression, row_group)
+                    since_output_write = 0
+
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        pass  # handled in finally
+
+    finally:
+        # Always flush on exit — clean finish or Ctrl+C
+        if results:
+            df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+            _parquet_write(df, cache_path)
+            log.info("    Cache saved: %d entries (including pre-existing)", len(df))
+
     return results
 
 
