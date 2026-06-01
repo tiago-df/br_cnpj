@@ -258,13 +258,13 @@ def _process_chunk(
     # Layer 2 (CEP + num only) removed — same CEP can cover many streets,
     # producing false positives especially in small towns with a single CEP.
 
-    # ── Layer 3: street_norm + num + city + bairro disambiguation ────────────
-    # Bairro exact match (after aggressive normalisation: parentheses stripped,
-    # prepositions removed) disambiguates identical street+num+city combinations
-    # in different neighbourhoods (e.g. "RUA SANTO ANTONIO" in multiple bairros).
+    # ── Layer 3: street_norm + num + city + bairro JW disambiguation ─────────
+    # Bairro Jaro-Winkler (>= 0.80) tolerates abbreviation differences
+    # ("JD SAO JOAO" ≈ "JARDIM SAO JOAO") while still rejecting clearly
+    # different neighbourhoods.
     # Accept if: exactly 1 total candidate (bairro unavailable / not useful),
-    #         OR bairro uniquely narrows candidates to exactly 1 match.
-    # suburb_clean already has parenthetical suffixes stripped (computed in pre-filter).
+    #         OR bairro JW >= 0.80 narrows candidates to exactly 1 match.
+    # suburb_clean has parenthetical suffixes stripped (computed in pre-filter).
     already_sql = (
         f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in matched_in_chunk)})"
         if matched_in_chunk else ""
@@ -276,20 +276,20 @@ def _process_chunk(
                 CASE
                     WHEN p.bairro_norm IS NOT NULL
                      AND a.suburb_clean IS NOT NULL
-                     AND p.bairro_norm = a.suburb_clean
                      AND length(p.bairro_norm) > 0
-                     AND length(a.suburb_clean) > 0 THEN 1
-                    ELSE 0
+                     AND length(a.suburb_clean) > 0
+                     AND jaro_winkler_similarity(p.bairro_norm, a.suburb_clean) >= 0.80
+                    THEN 1 ELSE 0
                 END AS bairro_match,
-                count(*) OVER (PARTITION BY p.cnpj)         AS n_total,
+                count(*) OVER (PARTITION BY p.cnpj) AS n_total,
                 sum(CASE
                         WHEN p.bairro_norm IS NOT NULL
                          AND a.suburb_clean IS NOT NULL
-                         AND p.bairro_norm = a.suburb_clean
                          AND length(p.bairro_norm) > 0
-                         AND length(a.suburb_clean) > 0 THEN 1
-                        ELSE 0
-                    END) OVER (PARTITION BY p.cnpj)          AS n_bairro
+                         AND length(a.suburb_clean) > 0
+                         AND jaro_winkler_similarity(p.bairro_norm, a.suburb_clean) >= 0.80
+                        THEN 1 ELSE 0
+                    END) OVER (PARTITION BY p.cnpj) AS n_bairro
             FROM chunk p
             JOIN apt_city_filter a
               ON  p.street_norm = a.street_norm
@@ -301,18 +301,19 @@ def _process_chunk(
         )
         SELECT DISTINCT ON (cnpj) cnpj, lat, lon
         FROM cands
-        WHERE n_total = 1          -- unique city+street+num match (no bairro needed)
-           OR n_bairro = 1         -- bairro uniquely identifies one candidate
+        WHERE n_total = 1      -- unique city+street+num (bairro not needed)
+           OR n_bairro = 1     -- bairro JW uniquely identifies one candidate
         ORDER BY cnpj, bairro_match DESC
     """, "apt_street_exact")
 
-    # ── Layer 4: fuzzy street + num + city + bairro JW blocking ─────────────
-    # Bairro similarity (JW >= 0.80) used as soft blocking:
-    #   - Skipped when either side has no bairro/suburb data (preserves recall)
-    #   - JW 0.80 tolerates abbreviation differences ("VL ANTONIO" ≈ "VILA ANTONIO")
-    #     and minor spelling variants, while rejecting cross-neighbourhood matches
-    #     ("VILA ANTONIO" ≠ "JARDIM AMERICA", JW ~0.60)
-    # suburb_clean has parenthetical suffixes stripped (computed in pre-filter).
+    # ── Layer 4: fuzzy street (full name JW) + num + city + bairro JW ────────
+    # Full street-name JW without left(N) prefix blocking:
+    #   - Catches cases where street type differs between sources
+    #     (CNPJ "ESTRADA X" vs APT "RUA X") — left(5) blocking would miss these
+    #   - Bairro JW >= 0.80 remains as the primary blocking key (city+bairro),
+    #     combined with house-number equality, to keep the search tractable
+    # Note: without prefix blocking, large cities may be slower on full runs;
+    # bairro + num blocking compensates.
     already_sql = (
         f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in matched_in_chunk)})"
         if matched_in_chunk else ""
@@ -322,12 +323,11 @@ def _process_chunk(
             p.cnpj, a.lat, a.lon
         FROM chunk p
         JOIN apt_city_filter a
-          ON  p.city_norm            = a.city_norm
-          AND left(p.street_norm, 5) = left(a.street_norm, 5)
-          AND p.num_norm             = a.num_norm
+          ON  p.city_norm  = a.city_norm
+          AND p.num_norm   = a.num_norm
           AND p.street_norm IS NOT NULL
           AND p.num_norm    IS NOT NULL
-          -- Bairro blocking: JW >= 0.80 when both sides have data
+          -- Bairro soft blocking: JW >= 0.80 when both sides have data
           AND (p.bairro_norm IS NULL
                OR length(a.suburb_clean) = 0
                OR jaro_winkler_similarity(p.bairro_norm, a.suburb_clean) >= 0.80)

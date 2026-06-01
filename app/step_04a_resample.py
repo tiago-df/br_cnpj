@@ -105,7 +105,7 @@ def _run_join(
 
     # Layer 2 removed (CEP+num only — too many false positives)
 
-    # Layer 3: street exact + num + city, bairro-disambiguated (parentheses stripped)
+    # Layer 3: street exact + num + city, bairro JW >= 0.80 disambiguation
     already = f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in results)})" if results else ""
     run_layer(f"""
         WITH cands AS (
@@ -113,15 +113,17 @@ def _run_join(
                 p.cnpj, a.lat, a.lon,
                 CASE WHEN p.bairro_norm IS NOT NULL
                       AND a.suburb_clean IS NOT NULL
-                      AND p.bairro_norm = a.suburb_clean
                       AND length(p.bairro_norm) > 0
-                      AND length(a.suburb_clean) > 0 THEN 1 ELSE 0 END AS bairro_match,
+                      AND length(a.suburb_clean) > 0
+                      AND jaro_winkler_similarity(p.bairro_norm, a.suburb_clean) >= 0.80
+                     THEN 1 ELSE 0 END AS bairro_match,
                 count(*) OVER (PARTITION BY p.cnpj) AS n_total,
                 sum(CASE WHEN p.bairro_norm IS NOT NULL
                           AND a.suburb_clean IS NOT NULL
-                          AND p.bairro_norm = a.suburb_clean
                           AND length(p.bairro_norm) > 0
-                          AND length(a.suburb_clean) > 0 THEN 1 ELSE 0 END)
+                          AND length(a.suburb_clean) > 0
+                          AND jaro_winkler_similarity(p.bairro_norm, a.suburb_clean) >= 0.80
+                         THEN 1 ELSE 0 END)
                     OVER (PARTITION BY p.cnpj) AS n_bairro
             FROM sample_poi p
             JOIN apt_city_filter a
@@ -136,15 +138,14 @@ def _run_join(
         ORDER BY cnpj, bairro_match DESC
     """, "apt_street_exact")
 
-    # Layer 4: fuzzy street + bairro JW >= 0.80 blocking (soft, skipped when data missing)
+    # Layer 4: fuzzy full street JW + num + city + bairro JW blocking
     already = f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in results)})" if results else ""
     run_layer(f"""
         SELECT DISTINCT ON (p.cnpj) p.cnpj, a.lat, a.lon
         FROM sample_poi p
         JOIN apt_city_filter a
-          ON  p.city_norm            = a.city_norm
-          AND left(p.street_norm, 5) = left(a.street_norm, 5)
-          AND p.num_norm             = a.num_norm
+          ON  p.city_norm  = a.city_norm
+          AND p.num_norm   = a.num_norm
           AND p.street_norm IS NOT NULL AND p.num_norm IS NOT NULL
           AND (p.bairro_norm IS NULL
                OR length(a.suburb_clean) = 0
