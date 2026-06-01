@@ -172,16 +172,14 @@ which correctly resolves the vast majority (confirmed by OSM validation).
 
 ### 6.1 SP geocoding — final results (v5, L1+L3 only)
 
-**Run date:** 2026-06-01 | **POIs:** 982,079 | **APT:** 12,316,667 rows
+**Run date:** 2026-06-01 | **Duration:** 615.9 s | **POIs:** 982,079 | **APT:** 12,316,667 rows | **Output:** 81.2 MB
 
 | Layer | POIs | Coverage | Mean dist vs TomTom |
 |---|---|---|---|
-| `apt_cep_num_street` (L1) | ~597K | ~60.9% | 23 m |
-| `apt_street_exact` (L3) | ~78K | ~7.9% | 945 m |
-| **Total geocoded** | **~675K** | **~68.8%** | — |
-| `none` (for Phase C) | ~307K | ~31.2% | — |
-
-*Exact numbers will be updated when the 2026-06-01 run completes.*
+| `apt_cep_num_street` (L1) | 566,069 | 57.6% | 23 m |
+| `apt_street_exact` (L3) | 58,130 | 5.9% | 945 m |
+| **Total geocoded** | **624,199** | **63.6%** | — |
+| `none` (for Phase C/CNEFE) | 357,880 | 36.4% | — |
 
 ### 6.2 Accuracy vs TomTom API (300-POI sample, v5 logic)
 
