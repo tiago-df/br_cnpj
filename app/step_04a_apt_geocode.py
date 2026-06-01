@@ -139,9 +139,9 @@ def _build_apt_index(gpkg_path: Path, cache_dir: Path) -> Path:
     con.execute("INSTALL spatial; LOAD spatial;")
 
     # Register Python UDFs for normalisation
-    con.create_function("norm_street", _norm_street, ["VARCHAR"], "VARCHAR")
-    con.create_function("norm_num",    _norm_num,    ["VARCHAR"], "VARCHAR")
-    con.create_function("norm_city",   _norm_city,   ["VARCHAR"], "VARCHAR")
+    con.create_function("norm_street", _norm_street, ["VARCHAR"], "VARCHAR", null_handling="special")
+    con.create_function("norm_num",    _norm_num,    ["VARCHAR"], "VARCHAR", null_handling="special")
+    con.create_function("norm_city",   _norm_city,   ["VARCHAR"], "VARCHAR", null_handling="special")
 
     gpkg = str(gpkg_path)
     con.execute(f"""
@@ -373,9 +373,9 @@ def run(
 
     # ── DuckDB session ────────────────────────────────────────────────────────
     con = duckdb.connect(":memory:", config={"memory_limit": mem})
-    con.create_function("norm_street", _norm_street, ["VARCHAR"], "VARCHAR")
-    con.create_function("norm_num",    _norm_num,    ["VARCHAR"], "VARCHAR")
-    con.create_function("norm_city",   _norm_city,   ["VARCHAR"], "VARCHAR")
+    con.create_function("norm_street", _norm_street, ["VARCHAR"], "VARCHAR", null_handling="special")
+    con.create_function("norm_num",    _norm_num,    ["VARCHAR"], "VARCHAR", null_handling="special")
+    con.create_function("norm_city",   _norm_city,   ["VARCHAR"], "VARCHAR", null_handling="special")
 
     # ── Run join layers ───────────────────────────────────────────────────────
     _geocode_layers(
