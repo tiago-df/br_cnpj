@@ -102,8 +102,13 @@ def _norm_city(s: str | None) -> str | None:
 # ── APT pre-processing ───────────────────────────────────────────────────────
 
 def _build_apt_index(gpkg_path: Path, cache_dir: Path) -> Path:
-    """Convert GeoPackage → normalised Parquet index (cached, runs once)."""
-    index_path = cache_dir / f"apt_index_{gpkg_path.stem}.parquet"
+    """Convert GeoPackage → normalised Parquet index (cached, runs once).
+
+    v2: adds suburb_norm (normalised suburb for bairro matching in layers 3+4).
+    Old _v1 cache files (no suffix) are superseded — the new name forces a
+    one-time rebuild automatically.
+    """
+    index_path = cache_dir / f"apt_index_{gpkg_path.stem}_v2.parquet"
     if index_path.exists():
         log.info("  APT index cached: %s", index_path.name)
         return index_path
@@ -126,7 +131,8 @@ def _build_apt_index(gpkg_path: Path, cache_dir: Path) -> Path:
                 norm_street("street:pt-Latn")                          AS street_norm,
                 "street:pt-Latn"                                       AS street_raw,
                 norm_city("city:pt-Latn")                              AS city_norm,
-                "suburb:pt-Latn"                                       AS suburb,
+                norm_city("suburb:pt-Latn")                            AS suburb_norm,
+                "suburb:pt-Latn"                                       AS suburb_raw,
                 ST_Y(geom)                                             AS lat,
                 ST_X(geom)                                             AS lon
             FROM ST_Read('{gpkg_path}')
@@ -222,7 +228,8 @@ def _process_chunk(
           ON a.city_norm = f.city_norm
     """)
 
-    # ── Layer 1: CEP + num + street similarity ────────────────────────────────
+    # ── Layer 1: CEP + num + street similarity (threshold 0.90) ─────────────────
+    # Higher threshold reduces false-positives on large rural CEPs.
     run_layer(f"""
         SELECT DISTINCT ON (p.cnpj)
             p.cnpj, a.lat, a.lon
@@ -238,45 +245,55 @@ def _process_chunk(
         ORDER BY p.cnpj, jaro_winkler_similarity(p.street_norm, a.street_norm) DESC
     """, "apt_cep_num_street")
 
-    # ── Layer 2: CEP + num (unique match only) ────────────────────────────────
+    # Layer 2 (CEP + num only) removed — same CEP can cover many streets,
+    # producing false positives especially in small towns with a single CEP.
+
+    # ── Layer 3: street_norm + num + city + bairro disambiguation ────────────
+    # Bairro is used to disambiguate when the same street name + number exists
+    # in multiple neighbourhoods of the same city (e.g. "RUA SANTO ANTONIO").
+    # Accept if: exactly 1 total candidate (old behaviour, bairro unavailable),
+    #         OR bairro narrows the candidates to exactly 1 match.
     already_sql = (
         f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in matched_in_chunk)})"
         if matched_in_chunk else ""
     )
     run_layer(f"""
         WITH cands AS (
-            SELECT p.cnpj, a.lat, a.lon,
-                   count(*) OVER (PARTITION BY p.cnpj) AS n_matches
+            SELECT
+                p.cnpj, a.lat, a.lon,
+                CASE
+                    WHEN p.bairro_norm IS NOT NULL
+                     AND a.suburb_norm IS NOT NULL
+                     AND p.bairro_norm = a.suburb_norm THEN 1
+                    ELSE 0
+                END AS bairro_match,
+                count(*) OVER (PARTITION BY p.cnpj)         AS n_total,
+                sum(CASE
+                        WHEN p.bairro_norm IS NOT NULL
+                         AND a.suburb_norm IS NOT NULL
+                         AND p.bairro_norm = a.suburb_norm THEN 1
+                        ELSE 0
+                    END) OVER (PARTITION BY p.cnpj)          AS n_bairro
             FROM chunk p
-            JOIN apt_cep_filter a
-              ON  p.cep_norm = a.cep_norm
-              AND p.num_norm = a.num_norm
-              AND p.cep_norm IS NOT NULL
-              AND p.num_norm IS NOT NULL
+            JOIN apt_city_filter a
+              ON  p.street_norm = a.street_norm
+              AND p.num_norm    = a.num_norm
+              AND p.city_norm   = a.city_norm
+              AND p.street_norm IS NOT NULL
+              AND p.num_norm    IS NOT NULL
             WHERE 1=1 {already_sql}
         )
-        SELECT cnpj, lat, lon FROM cands WHERE n_matches = 1
-    """, "apt_cep_num")
-
-    # ── Layer 3: street_norm + num + city (exact) ─────────────────────────────
-    already_sql = (
-        f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in matched_in_chunk)})"
-        if matched_in_chunk else ""
-    )
-    run_layer(f"""
-        SELECT DISTINCT ON (p.cnpj) p.cnpj, a.lat, a.lon
-        FROM chunk p
-        JOIN apt_city_filter a
-          ON  p.street_norm = a.street_norm
-          AND p.num_norm    = a.num_norm
-          AND p.city_norm   = a.city_norm
-          AND p.street_norm IS NOT NULL
-          AND p.num_norm    IS NOT NULL
-        WHERE 1=1 {already_sql}
-        ORDER BY p.cnpj
+        SELECT DISTINCT ON (cnpj) cnpj, lat, lon
+        FROM cands
+        WHERE n_total = 1          -- unique city+street+num match (no bairro needed)
+           OR n_bairro = 1         -- bairro uniquely identifies one candidate
+        ORDER BY cnpj, bairro_match DESC
     """, "apt_street_exact")
 
-    # ── Layer 4: fuzzy street + num + city (blocked) ──────────────────────────
+    # ── Layer 4: fuzzy street + num + city + bairro blocking ─────────────────
+    # Bairro prefix added as an additional blocking key so a fuzzy street name
+    # in one neighbourhood cannot match a similarly-named street elsewhere.
+    # Blocking is soft: skipped when either side lacks bairro/suburb data.
     already_sql = (
         f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in matched_in_chunk)})"
         if matched_in_chunk else ""
@@ -291,6 +308,10 @@ def _process_chunk(
           AND p.num_norm             = a.num_norm
           AND p.street_norm IS NOT NULL
           AND p.num_norm    IS NOT NULL
+          -- Bairro blocking: require matching prefix when both sides have data
+          AND (p.bairro_norm IS NULL
+               OR a.suburb_norm IS NULL
+               OR left(p.bairro_norm, 4) = left(a.suburb_norm, 4))
         WHERE jaro_winkler_similarity(p.street_norm, a.street_norm) >= {fuzzy_threshold}
           {already_sql}
         ORDER BY p.cnpj, jaro_winkler_similarity(p.street_norm, a.street_norm) DESC
@@ -308,7 +329,7 @@ def run(
     gpkg_paths: list[Path],
     uf_filter: list[str] | None = None,
     chunk_size: int = 10_000,
-    sim_threshold: float = 0.80,
+    sim_threshold: float = 0.90,
     fuzzy_threshold: float = 0.85,
     force: bool = False,
 ) -> Path:
@@ -394,7 +415,11 @@ def run(
                 regexp_replace({abbrev_sql}, '\s+(DE|DA|DO|DAS|DOS|E)\s+', ' ', 'g'),
             '\s+', ' ', 'g')                                                   AS street_norm,
             -- City: upper (CNPJ already ASCII)
-            upper(trim(municipio_descricao))                                   AS city_norm
+            upper(trim(municipio_descricao))                                   AS city_norm,
+            -- Bairro: remove prepositions + collapse spaces (CNPJ already ASCII uppercase)
+            regexp_replace(
+                regexp_replace(upper(trim(bairro)), '\s+(DE|DA|DO|DAS|DOS|E)\s+', ' ', 'g'),
+            '\s+', ' ', 'g')                                                   AS bairro_norm
         FROM read_parquet('{joined_path}')
         WHERE 1=1 {uf_where}
     """)
@@ -507,8 +532,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--uf", nargs="+", metavar="UF")
     p.add_argument("--chunk-size", type=int, default=10_000,
                    help="POIs per processing chunk (default 10000)")
-    p.add_argument("--sim-threshold",   type=float, default=0.80)
-    p.add_argument("--fuzzy-threshold", type=float, default=0.85)
+    p.add_argument("--sim-threshold",   type=float, default=0.90,
+                   help="Jaro-Winkler threshold for Layer 1 CEP+num+street (default 0.90)")
+    p.add_argument("--fuzzy-threshold", type=float, default=0.85,
+                   help="Jaro-Winkler threshold for Layer 4 fuzzy street (default 0.85)")
     p.add_argument("--force", action="store_true",
                    help="Ignore existing checkpoint and restart from scratch")
     return p.parse_args()
