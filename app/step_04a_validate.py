@@ -45,8 +45,10 @@ log = logging.getLogger(__name__)
 
 # ── TomTom API ───────────────────────────────────────────────────────────────
 _TT_STRUCTURED_URL = "https://api.tomtom.com/search/2/structuredGeocode.json"
-_TT_WORKERS        = 5   # concurrent requests — safe for most TomTom plans
+_TT_WORKERS        = 2    # concurrent requests — TomTom free tier: 5 QPS
 _TT_TIMEOUT_S      = 15
+_TT_DELAY_S        = 0.25 # seconds between requests per worker (2 workers × 4/s = ~5 QPS safe)
+_TT_MAX_RETRIES    = 4    # retries on 429 (with exponential backoff)
 
 
 # ── Haversine distance ────────────────────────────────────────────────────────
@@ -79,42 +81,53 @@ async def _geocode_tt(
     }
 
     row = dict(row)  # copy so we can mutate
-    row["tt_lat"]    = None
-    row["tt_lon"]    = None
-    row["tt_score"]  = None
-    row["tt_type"]   = None
-    row["tt_error"]  = None
+    row["tt_lat"]     = None
+    row["tt_lon"]     = None
+    row["tt_score"]   = None
+    row["tt_type"]    = None
+    row["tt_error"]   = None
     row["distance_m"] = None
 
-    try:
-        async with session.get(
-            _TT_STRUCTURED_URL,
-            params=params,
-            timeout=aiohttp.ClientTimeout(total=_TT_TIMEOUT_S),
-        ) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                results = data.get("results", [])
-                if results:
-                    r  = results[0]
-                    pos = r.get("position", {})
-                    row["tt_lat"]   = pos.get("lat")
-                    row["tt_lon"]   = pos.get("lon")
-                    row["tt_score"] = r.get("score")
-                    row["tt_type"]  = r.get("type")
-                    if row["tt_lat"] is not None:
-                        row["distance_m"] = _haversine_m(
-                            row["apt_lat"], row["apt_lon"],
-                            row["tt_lat"],  row["tt_lon"],
-                        )
+    for attempt in range(_TT_MAX_RETRIES + 1):
+        try:
+            async with session.get(
+                _TT_STRUCTURED_URL,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=_TT_TIMEOUT_S),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    hits = data.get("results", [])
+                    if hits:
+                        r   = hits[0]
+                        pos = r.get("position", {})
+                        row["tt_lat"]   = pos.get("lat")
+                        row["tt_lon"]   = pos.get("lon")
+                        row["tt_score"] = r.get("score")
+                        row["tt_type"]  = r.get("type")
+                        if row["tt_lat"] is not None:
+                            row["distance_m"] = _haversine_m(
+                                row["apt_lat"], row["apt_lon"],
+                                row["tt_lat"],  row["tt_lon"],
+                            )
+                    else:
+                        row["tt_error"] = "no_results"
+                    break  # success (200 with or without results)
+                elif resp.status == 429:
+                    backoff = 2 ** attempt  # 1, 2, 4, 8 s
+                    if attempt < _TT_MAX_RETRIES:
+                        await asyncio.sleep(backoff)
+                        continue
+                    row["tt_error"] = "http_429_max_retries"
                 else:
-                    row["tt_error"] = "no_results"
-            else:
-                row["tt_error"] = f"http_{resp.status}"
-    except asyncio.TimeoutError:
-        row["tt_error"] = "timeout"
-    except Exception as exc:
-        row["tt_error"] = f"error:{exc}"
+                    row["tt_error"] = f"http_{resp.status}"
+                    break
+        except asyncio.TimeoutError:
+            row["tt_error"] = "timeout"
+            break
+        except Exception as exc:
+            row["tt_error"] = f"error:{exc}"
+            break
 
     return row
 
@@ -133,8 +146,7 @@ async def _run_validation(
 
     async def worker():
         nonlocal done
-        connector = aiohttp.TCPConnector(limit=_TT_WORKERS)
-        async with aiohttp.ClientSession(connector=connector) as session:
+        async with aiohttp.ClientSession() as session:
             while True:
                 try:
                     row = queue.get_nowait()
@@ -143,9 +155,10 @@ async def _run_validation(
                 enriched = await _geocode_tt(session, api_key, row)
                 results.append(enriched)
                 done += 1
-                if done % 50 == 0 or done == len(sample_rows):
+                if done % 25 == 0 or done == len(sample_rows):
                     pct = 100 * done / len(sample_rows)
                     log.info("  TomTom validation: %d/%d (%.0f%%)", done, len(sample_rows), pct)
+                await asyncio.sleep(_TT_DELAY_S)  # respect rate limit
 
     await asyncio.gather(*[worker() for _ in range(_TT_WORKERS)])
     return results
@@ -232,7 +245,8 @@ def _draw_sample(parquet_path: Path, n: int) -> list[dict]:
             FROM read_parquet('{parquet_path}')
             WHERE geo_precision = '{prec}'
               AND lat IS NOT NULL AND lon IS NOT NULL
-            USING SAMPLE {k} ROWS
+            ORDER BY random()
+            LIMIT {k}
         """).fetchall()
         cols = [
             "cnpj","razao_social","tipo_logradouro","logradouro","numero",
@@ -247,8 +261,8 @@ def _draw_sample(parquet_path: Path, n: int) -> list[dict]:
 
 # ── Statistics ────────────────────────────────────────────────────────────────
 def _print_stats(results: list[dict]) -> None:
-    dists = [r["distance_m"] for r in results if r["distance_m"] is not None]
-    no_result = sum(1 for r in results if r["tt_error"] == "no_results" or r["tt_lat"] is None)
+    dists     = [r["distance_m"] for r in results if r["distance_m"] is not None]
+    no_result = sum(1 for r in results if r["tt_error"] == "no_results")
     errors    = sum(1 for r in results if r["tt_error"] and r["tt_error"] != "no_results")
 
     log.info("")
