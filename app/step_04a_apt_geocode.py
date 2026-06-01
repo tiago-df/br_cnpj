@@ -427,12 +427,12 @@ def run(
             -- Numero: leading digits, NULL for S/N
             CASE
                 WHEN upper(trim(numero)) IN ('S/N','SN','S N','0','')         THEN NULL
-                ELSE regexp_extract(trim(numero), '^\d+')
+                ELSE regexp_extract(trim(numero), '^[0-9]+')
             END                                                                AS num_norm,
             -- Street: expand abbreviation + upper (CNPJ already ASCII)
             regexp_replace(
-                regexp_replace({abbrev_sql}, '\s+(DE|DA|DO|DAS|DOS|E)\s+', ' ', 'g'),
-            '\s+', ' ', 'g')                                                   AS street_norm,
+                regexp_replace({abbrev_sql}, '\\s+(DE|DA|DO|DAS|DOS|E)\\s+', ' ', 'g'),
+            '\\s+', ' ', 'g')                                                  AS street_norm,
             -- City: upper (CNPJ already ASCII)
             upper(trim(municipio_descricao))                                   AS city_norm,
             -- Bairro: strip parenthetical suffixes (e.g. "(ZONA NORTE)"), remove prepositions,
