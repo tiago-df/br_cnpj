@@ -355,20 +355,46 @@ def run(
     n_apt = con.execute("SELECT count(*) FROM apt").fetchone()[0]
     log.info("  APT: %s rows loaded in %.1f s", f"{n_apt:,}", time.perf_counter() - t0)
 
-    # Load POI addresses with normalised fields
+    # Load POI addresses with normalised fields.
+    # CNPJ data is already uppercase ASCII — no Python UDFs needed on this side.
+    # norm_num and norm_street only needed for APT (UTF-8 with accents).
     uf_where = ""
     if uf_filter:
         ufs = ", ".join(f"'{u}'" for u in uf_filter)
         uf_where = f"AND uf IN ({ufs})"
+
+    # Abbreviation expansion via SQL CASE (top 8 most common in CNPJ data)
+    abbrev_sql = """
+        CASE
+            WHEN regexp_matches(upper(trim(tipo_logradouro)), '^R$|^RUA$')         THEN 'RUA '
+            WHEN regexp_matches(upper(trim(tipo_logradouro)), '^AV$|^AVENIDA$')    THEN 'AVENIDA '
+            WHEN regexp_matches(upper(trim(tipo_logradouro)), '^TV$|^TRAV$|^TRAVESSA$') THEN 'TRAVESSA '
+            WHEN regexp_matches(upper(trim(tipo_logradouro)), '^AL$|^ALM$|^ALAMEDA$')  THEN 'ALAMEDA '
+            WHEN regexp_matches(upper(trim(tipo_logradouro)), '^PC$|^PCA$|^PRACA$')    THEN 'PRACA '
+            WHEN regexp_matches(upper(trim(tipo_logradouro)), '^EST$|^ESTRADA$')        THEN 'ESTRADA '
+            WHEN regexp_matches(upper(trim(tipo_logradouro)), '^ROD$|^RODOVIA$')        THEN 'RODOVIA '
+            WHEN regexp_matches(upper(trim(tipo_logradouro)), '^LG$|^LARGO$')           THEN 'LARGO '
+            ELSE upper(trim(tipo_logradouro)) || ' '
+        END || upper(trim(logradouro))
+    """
     con.execute(f"""
         CREATE OR REPLACE TABLE poi_full AS
         SELECT
             cnpj, tipo_logradouro, logradouro, numero,
             bairro, cep, municipio, municipio_descricao, uf,
-            regexp_replace(cep, '[^0-9]', '', 'g')                 AS cep_norm,
-            norm_num(numero)                                         AS num_norm,
-            norm_street(tipo_logradouro || ' ' || logradouro)       AS street_norm,
-            norm_city(municipio_descricao)                           AS city_norm
+            -- CEP: digits only
+            regexp_replace(cep, '[^0-9]', '', 'g')                            AS cep_norm,
+            -- Numero: leading digits, NULL for S/N
+            CASE
+                WHEN upper(trim(numero)) IN ('S/N','SN','S N','0','')         THEN NULL
+                ELSE regexp_extract(trim(numero), '^\d+')
+            END                                                                AS num_norm,
+            -- Street: expand abbreviation + upper (CNPJ already ASCII)
+            regexp_replace(
+                regexp_replace({abbrev_sql}, '\s+(DE|DA|DO|DAS|DOS|E)\s+', ' ', 'g'),
+            '\s+', ' ', 'g')                                                   AS street_norm,
+            -- City: upper (CNPJ already ASCII)
+            upper(trim(municipio_descricao))                                   AS city_norm
         FROM read_parquet('{joined_path}')
         WHERE 1=1 {uf_where}
     """)
