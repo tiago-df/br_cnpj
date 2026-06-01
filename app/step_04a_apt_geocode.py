@@ -184,7 +184,6 @@ def _process_chunk(
     chunk_cnpjs: list[str],
     already_matched: set[str],
     sim_threshold: float,
-    fuzzy_threshold: float,
 ) -> list[tuple]:
     """Run 4-layer join for a chunk of CNPJs.  Returns [(cnpj, lat, lon, prec)]."""
 
@@ -306,35 +305,10 @@ def _process_chunk(
         ORDER BY cnpj, bairro_match DESC
     """, "apt_street_exact")
 
-    # ── Layer 4: fuzzy street (full name JW) + num + city + bairro JW ────────
-    # Full street-name JW without left(N) prefix blocking:
-    #   - Catches cases where street type differs between sources
-    #     (CNPJ "ESTRADA X" vs APT "RUA X") — left(5) blocking would miss these
-    #   - Bairro JW >= 0.80 remains as the primary blocking key (city+bairro),
-    #     combined with house-number equality, to keep the search tractable
-    # Note: without prefix blocking, large cities may be slower on full runs;
-    # bairro + num blocking compensates.
-    already_sql = (
-        f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in matched_in_chunk)})"
-        if matched_in_chunk else ""
-    )
-    run_layer(f"""
-        SELECT DISTINCT ON (p.cnpj)
-            p.cnpj, a.lat, a.lon
-        FROM chunk p
-        JOIN apt_city_filter a
-          ON  p.city_norm  = a.city_norm
-          AND p.num_norm   = a.num_norm
-          AND p.street_norm IS NOT NULL
-          AND p.num_norm    IS NOT NULL
-          -- Bairro soft blocking: JW >= 0.80 when both sides have data
-          AND (p.bairro_norm IS NULL
-               OR length(a.suburb_clean) = 0
-               OR jaro_winkler_similarity(p.bairro_norm, a.suburb_clean) >= 0.80)
-        WHERE jaro_winkler_similarity(p.street_norm, a.street_norm) >= {fuzzy_threshold}
-          {already_sql}
-        ORDER BY p.cnpj, jaro_winkler_similarity(p.street_norm, a.street_norm) DESC
-    """, "apt_fuzzy")
+    # Layer 4 (apt_fuzzy) removed — OSM validation confirmed 92% false-positive
+    # rate: JW street similarity without a CEP anchor matches wrong streets in
+    # different neighbourhoods.  Those POIs fall through to Phase C (TomTom API)
+    # or future IBGE CNEFE join.
 
     return results
 
@@ -349,7 +323,6 @@ def run(
     uf_filter: list[str] | None = None,
     chunk_size: int = 10_000,
     sim_threshold: float = 0.90,
-    fuzzy_threshold: float = 0.85,
     force: bool = False,
 ) -> Path:
     """Geocode POIs via APT local join with incremental checkpointing."""
@@ -471,7 +444,7 @@ def run(
     for chunk_idx, chunk in enumerate(chunks):
         results = _process_chunk(
             con, chunk, set(matched.keys()),
-            sim_threshold, fuzzy_threshold,
+            sim_threshold,
         )
 
         for cnpj, lat, lon, prec in results:
@@ -554,10 +527,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--uf", nargs="+", metavar="UF")
     p.add_argument("--chunk-size", type=int, default=10_000,
                    help="POIs per processing chunk (default 10000)")
-    p.add_argument("--sim-threshold",   type=float, default=0.90,
+    p.add_argument("--sim-threshold", type=float, default=0.90,
                    help="Jaro-Winkler threshold for Layer 1 CEP+num+street (default 0.90)")
-    p.add_argument("--fuzzy-threshold", type=float, default=0.85,
-                   help="Jaro-Winkler threshold for Layer 4 fuzzy street (default 0.85)")
     p.add_argument("--force", action="store_true",
                    help="Ignore existing checkpoint and restart from scratch")
     return p.parse_args()
@@ -581,6 +552,5 @@ if __name__ == "__main__":
         uf_filter        = args.uf,
         chunk_size       = args.chunk_size,
         sim_threshold    = args.sim_threshold,
-        fuzzy_threshold  = args.fuzzy_threshold,
         force            = args.force,
     )
