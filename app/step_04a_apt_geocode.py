@@ -418,8 +418,8 @@ def run(
             upper(trim(municipio_descricao))                                   AS city_norm,
             -- Bairro: remove prepositions + collapse spaces (CNPJ already ASCII uppercase)
             regexp_replace(
-                regexp_replace(upper(trim(bairro)), '\s+(DE|DA|DO|DAS|DOS|E)\s+', ' ', 'g'),
-            '\s+', ' ', 'g')                                                   AS bairro_norm
+                regexp_replace(upper(trim(bairro)), '\\s+(DE|DA|DO|DAS|DOS|E)\\s+', ' ', 'g'),
+            '\\s+', ' ', 'g')                                                  AS bairro_norm
         FROM read_parquet('{joined_path}')
         WHERE 1=1 {uf_where}
     """)

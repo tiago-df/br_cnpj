@@ -328,15 +328,15 @@ def run(
             bairro, cep, municipio, municipio_descricao, uf,
             regexp_replace(cep, '[^0-9]', '', 'g') AS cep_norm,
             CASE WHEN upper(trim(numero)) IN ('S/N','SN','S N','0','') THEN NULL
-                 ELSE regexp_extract(trim(numero), '^\\d+')
+                 ELSE regexp_extract(trim(numero), '^[0-9]+')
             END AS num_norm,
             regexp_replace(
-                regexp_replace({_ABBREV_SQL}, '\\s+(DE|DA|DO|DAS|DOS|E)\\s+', ' ', 'g'),
-            '\\s+', ' ', 'g') AS street_norm,
+                regexp_replace({_ABBREV_SQL}, '[[:space:]]+(DE|DA|DO|DAS|DOS|E)[[:space:]]+', ' ', 'g'),
+            '[[:space:]]+', ' ', 'g') AS street_norm,
             upper(trim(municipio_descricao)) AS city_norm,
             regexp_replace(
-                regexp_replace(upper(trim(bairro)), '\\s+(DE|DA|DO|DAS|DOS|E)\\s+', ' ', 'g'),
-            '\\s+', ' ', 'g') AS bairro_norm
+                regexp_replace(upper(trim(bairro)), '[[:space:]]+(DE|DA|DO|DAS|DOS|E)[[:space:]]+', ' ', 'g'),
+            '[[:space:]]+', ' ', 'g') AS bairro_norm
         FROM read_parquet('{joined_path}')
         WHERE cnpj IN ({cnpj_in}) {uf_where}
     """)
