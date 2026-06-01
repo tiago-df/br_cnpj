@@ -214,16 +214,26 @@ def _process_chunk(
                 results.append((cnpj, lat, lon, label))
                 matched_in_chunk.add(cnpj)
 
-    # Pre-filter APT to relevant CEPs and cities (huge performance gain)
+    # Pre-filter APT to relevant CEPs and cities (huge performance gain).
+    # suburb_clean: strip parenthetical suffixes from APT suburb_norm inline
+    # so L3/L4 bairro comparisons use the same normalisation as poi bairro_norm.
     con.execute("""
         CREATE OR REPLACE TEMP TABLE apt_cep_filter AS
-        SELECT a.* FROM apt a
+        SELECT a.*,
+               regexp_replace(
+                   regexp_replace(coalesce(a.suburb_norm,''), '\\s*\\([^)]*\\)\\s*', '', 'g'),
+               '\\s+', ' ', 'g') AS suburb_clean
+        FROM apt a
         JOIN (SELECT DISTINCT cep_norm FROM chunk WHERE cep_norm IS NOT NULL) f
           ON a.cep_norm = f.cep_norm
     """)
     con.execute("""
         CREATE OR REPLACE TEMP TABLE apt_city_filter AS
-        SELECT a.* FROM apt a
+        SELECT a.*,
+               regexp_replace(
+                   regexp_replace(coalesce(a.suburb_norm,''), '\\s*\\([^)]*\\)\\s*', '', 'g'),
+               '\\s+', ' ', 'g') AS suburb_clean
+        FROM apt a
         JOIN (SELECT DISTINCT city_norm FROM chunk WHERE city_norm IS NOT NULL) f
           ON a.city_norm = f.city_norm
     """)
@@ -249,10 +259,12 @@ def _process_chunk(
     # producing false positives especially in small towns with a single CEP.
 
     # ── Layer 3: street_norm + num + city + bairro disambiguation ────────────
-    # Bairro is used to disambiguate when the same street name + number exists
-    # in multiple neighbourhoods of the same city (e.g. "RUA SANTO ANTONIO").
-    # Accept if: exactly 1 total candidate (old behaviour, bairro unavailable),
-    #         OR bairro narrows the candidates to exactly 1 match.
+    # Bairro exact match (after aggressive normalisation: parentheses stripped,
+    # prepositions removed) disambiguates identical street+num+city combinations
+    # in different neighbourhoods (e.g. "RUA SANTO ANTONIO" in multiple bairros).
+    # Accept if: exactly 1 total candidate (bairro unavailable / not useful),
+    #         OR bairro uniquely narrows candidates to exactly 1 match.
+    # suburb_clean already has parenthetical suffixes stripped (computed in pre-filter).
     already_sql = (
         f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in matched_in_chunk)})"
         if matched_in_chunk else ""
@@ -263,15 +275,19 @@ def _process_chunk(
                 p.cnpj, a.lat, a.lon,
                 CASE
                     WHEN p.bairro_norm IS NOT NULL
-                     AND a.suburb_norm IS NOT NULL
-                     AND p.bairro_norm = a.suburb_norm THEN 1
+                     AND a.suburb_clean IS NOT NULL
+                     AND p.bairro_norm = a.suburb_clean
+                     AND length(p.bairro_norm) > 0
+                     AND length(a.suburb_clean) > 0 THEN 1
                     ELSE 0
                 END AS bairro_match,
                 count(*) OVER (PARTITION BY p.cnpj)         AS n_total,
                 sum(CASE
                         WHEN p.bairro_norm IS NOT NULL
-                         AND a.suburb_norm IS NOT NULL
-                         AND p.bairro_norm = a.suburb_norm THEN 1
+                         AND a.suburb_clean IS NOT NULL
+                         AND p.bairro_norm = a.suburb_clean
+                         AND length(p.bairro_norm) > 0
+                         AND length(a.suburb_clean) > 0 THEN 1
                         ELSE 0
                     END) OVER (PARTITION BY p.cnpj)          AS n_bairro
             FROM chunk p
@@ -290,10 +306,13 @@ def _process_chunk(
         ORDER BY cnpj, bairro_match DESC
     """, "apt_street_exact")
 
-    # ── Layer 4: fuzzy street + num + city + bairro blocking ─────────────────
-    # Bairro prefix added as an additional blocking key so a fuzzy street name
-    # in one neighbourhood cannot match a similarly-named street elsewhere.
-    # Blocking is soft: skipped when either side lacks bairro/suburb data.
+    # ── Layer 4: fuzzy street + num + city + bairro JW blocking ─────────────
+    # Bairro similarity (JW >= 0.80) used as soft blocking:
+    #   - Skipped when either side has no bairro/suburb data (preserves recall)
+    #   - JW 0.80 tolerates abbreviation differences ("VL ANTONIO" ≈ "VILA ANTONIO")
+    #     and minor spelling variants, while rejecting cross-neighbourhood matches
+    #     ("VILA ANTONIO" ≠ "JARDIM AMERICA", JW ~0.60)
+    # suburb_clean has parenthetical suffixes stripped (computed in pre-filter).
     already_sql = (
         f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in matched_in_chunk)})"
         if matched_in_chunk else ""
@@ -308,10 +327,10 @@ def _process_chunk(
           AND p.num_norm             = a.num_norm
           AND p.street_norm IS NOT NULL
           AND p.num_norm    IS NOT NULL
-          -- Bairro blocking: require matching prefix when both sides have data
+          -- Bairro blocking: JW >= 0.80 when both sides have data
           AND (p.bairro_norm IS NULL
-               OR a.suburb_norm IS NULL
-               OR left(p.bairro_norm, 4) = left(a.suburb_norm, 4))
+               OR length(a.suburb_clean) = 0
+               OR jaro_winkler_similarity(p.bairro_norm, a.suburb_clean) >= 0.80)
         WHERE jaro_winkler_similarity(p.street_norm, a.street_norm) >= {fuzzy_threshold}
           {already_sql}
         ORDER BY p.cnpj, jaro_winkler_similarity(p.street_norm, a.street_norm) DESC
@@ -416,9 +435,12 @@ def run(
             '\s+', ' ', 'g')                                                   AS street_norm,
             -- City: upper (CNPJ already ASCII)
             upper(trim(municipio_descricao))                                   AS city_norm,
-            -- Bairro: remove prepositions + collapse spaces (CNPJ already ASCII uppercase)
+            -- Bairro: strip parenthetical suffixes (e.g. "(ZONA NORTE)"), remove prepositions,
+            --         collapse spaces. CNPJ data is already ASCII uppercase.
             regexp_replace(
-                regexp_replace(upper(trim(bairro)), '\\s+(DE|DA|DO|DAS|DOS|E)\\s+', ' ', 'g'),
+                regexp_replace(
+                    regexp_replace(upper(trim(bairro)), '\\s*\\([^)]*\\)\\s*', '', 'g'),
+                '\\s+(DE|DA|DO|DAS|DOS|E)\\s+', ' ', 'g'),
             '\\s+', ' ', 'g')                                                  AS bairro_norm
         FROM read_parquet('{joined_path}')
         WHERE 1=1 {uf_where}

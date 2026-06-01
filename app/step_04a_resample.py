@@ -68,16 +68,24 @@ def _run_join(
             if cnpj not in results:
                 results[cnpj] = (lat, lon, label)
 
-    # Pre-filters
+    # Pre-filters — suburb_clean strips parenthetical suffixes from APT suburb_norm
     con.execute("""
         CREATE OR REPLACE TEMP TABLE apt_cep_filter AS
-        SELECT a.* FROM apt a
+        SELECT a.*,
+               regexp_replace(
+                   regexp_replace(coalesce(a.suburb_norm,''), '\\s*\\([^)]*\\)\\s*', '', 'g'),
+               '\\s+', ' ', 'g') AS suburb_clean
+        FROM apt a
         JOIN (SELECT DISTINCT cep_norm FROM sample_poi WHERE cep_norm IS NOT NULL) f
           ON a.cep_norm = f.cep_norm
     """)
     con.execute("""
         CREATE OR REPLACE TEMP TABLE apt_city_filter AS
-        SELECT a.* FROM apt a
+        SELECT a.*,
+               regexp_replace(
+                   regexp_replace(coalesce(a.suburb_norm,''), '\\s*\\([^)]*\\)\\s*', '', 'g'),
+               '\\s+', ' ', 'g') AS suburb_clean
+        FROM apt a
         JOIN (SELECT DISTINCT city_norm FROM sample_poi WHERE city_norm IS NOT NULL) f
           ON a.city_norm = f.city_norm
     """)
@@ -97,17 +105,23 @@ def _run_join(
 
     # Layer 2 removed (CEP+num only — too many false positives)
 
-    # Layer 3: street exact + num + city, bairro-disambiguated
+    # Layer 3: street exact + num + city, bairro-disambiguated (parentheses stripped)
     already = f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in results)})" if results else ""
     run_layer(f"""
         WITH cands AS (
             SELECT
                 p.cnpj, a.lat, a.lon,
-                CASE WHEN p.bairro_norm IS NOT NULL AND a.suburb_norm IS NOT NULL
-                          AND p.bairro_norm = a.suburb_norm THEN 1 ELSE 0 END AS bairro_match,
+                CASE WHEN p.bairro_norm IS NOT NULL
+                      AND a.suburb_clean IS NOT NULL
+                      AND p.bairro_norm = a.suburb_clean
+                      AND length(p.bairro_norm) > 0
+                      AND length(a.suburb_clean) > 0 THEN 1 ELSE 0 END AS bairro_match,
                 count(*) OVER (PARTITION BY p.cnpj) AS n_total,
-                sum(CASE WHEN p.bairro_norm IS NOT NULL AND a.suburb_norm IS NOT NULL
-                              AND p.bairro_norm = a.suburb_norm THEN 1 ELSE 0 END)
+                sum(CASE WHEN p.bairro_norm IS NOT NULL
+                          AND a.suburb_clean IS NOT NULL
+                          AND p.bairro_norm = a.suburb_clean
+                          AND length(p.bairro_norm) > 0
+                          AND length(a.suburb_clean) > 0 THEN 1 ELSE 0 END)
                     OVER (PARTITION BY p.cnpj) AS n_bairro
             FROM sample_poi p
             JOIN apt_city_filter a
@@ -122,7 +136,7 @@ def _run_join(
         ORDER BY cnpj, bairro_match DESC
     """, "apt_street_exact")
 
-    # Layer 4: fuzzy + bairro blocking
+    # Layer 4: fuzzy street + bairro JW >= 0.80 blocking (soft, skipped when data missing)
     already = f"AND p.cnpj NOT IN ({', '.join(repr(c) for c in results)})" if results else ""
     run_layer(f"""
         SELECT DISTINCT ON (p.cnpj) p.cnpj, a.lat, a.lon
@@ -132,8 +146,9 @@ def _run_join(
           AND left(p.street_norm, 5) = left(a.street_norm, 5)
           AND p.num_norm             = a.num_norm
           AND p.street_norm IS NOT NULL AND p.num_norm IS NOT NULL
-          AND (p.bairro_norm IS NULL OR a.suburb_norm IS NULL
-               OR left(p.bairro_norm, 4) = left(a.suburb_norm, 4))
+          AND (p.bairro_norm IS NULL
+               OR length(a.suburb_clean) = 0
+               OR jaro_winkler_similarity(p.bairro_norm, a.suburb_clean) >= 0.80)
         WHERE jaro_winkler_similarity(p.street_norm, a.street_norm) >= {fuzzy_threshold}
           {already}
         ORDER BY p.cnpj, jaro_winkler_similarity(p.street_norm, a.street_norm) DESC
@@ -335,7 +350,9 @@ def run(
             '[[:space:]]+', ' ', 'g') AS street_norm,
             upper(trim(municipio_descricao)) AS city_norm,
             regexp_replace(
-                regexp_replace(upper(trim(bairro)), '[[:space:]]+(DE|DA|DO|DAS|DOS|E)[[:space:]]+', ' ', 'g'),
+                regexp_replace(
+                    regexp_replace(upper(trim(bairro)), '\\s*\\([^)]*\\)\\s*', '', 'g'),
+                '[[:space:]]+(DE|DA|DO|DAS|DOS|E)[[:space:]]+', ' ', 'g'),
             '[[:space:]]+', ' ', 'g') AS bairro_norm
         FROM read_parquet('{joined_path}')
         WHERE cnpj IN ({cnpj_in}) {uf_where}
