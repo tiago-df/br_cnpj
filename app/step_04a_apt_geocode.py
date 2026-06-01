@@ -110,8 +110,19 @@ def _build_apt_index(gpkg_path: Path, cache_dir: Path) -> Path:
     """
     index_path = cache_dir / f"apt_index_{gpkg_path.stem}_v2.parquet"
     if index_path.exists():
-        log.info("  APT index cached: %s", index_path.name)
-        return index_path
+        # Verify the cached index is not a partial/corrupt write from a
+        # previous interrupted run — a valid file must have at least 1 row.
+        try:
+            n_check = duckdb.execute(
+                f"SELECT count(*) FROM read_parquet('{index_path}')"
+            ).fetchone()[0]
+            if n_check > 0:
+                log.info("  APT index cached: %s (%s rows)", index_path.name, f"{n_check:,}")
+                return index_path
+            log.warning("  APT index empty, rebuilding: %s", index_path.name)
+        except Exception:
+            log.warning("  APT index corrupt, rebuilding: %s", index_path.name)
+        index_path.unlink(missing_ok=True)
 
     log.info("  Pre-processing %s → Parquet (runs once)…", gpkg_path.name)
     t0 = time.perf_counter()
@@ -421,12 +432,20 @@ def run(
     n_poi = con.execute("SELECT count(*) FROM poi_full").fetchone()[0]
     log.info("  POIs loaded: %s", f"{n_poi:,}")
 
-    # Get remaining CNPJs (skip already matched)
+    # Get remaining CNPJs (skip already matched).
+    # Use a temp table + ANTI JOIN instead of NOT IN (...) to avoid building
+    # a multi-million-item SQL string on large/resumed runs.
     if matched:
-        matched_list = ", ".join(f"'{c}'" for c in matched)
-        remaining = [r[0] for r in con.execute(
-            f"SELECT cnpj FROM poi_full WHERE cnpj NOT IN ({matched_list})"
-        ).fetchall()]
+        import pandas as _pd
+        _matched_df = _pd.DataFrame({"cnpj": list(matched.keys())})
+        con.register("_matched_df", _matched_df)
+        con.execute("CREATE OR REPLACE TEMP TABLE matched_cnpjs AS SELECT cnpj FROM _matched_df")
+        con.unregister("_matched_df")
+        del _matched_df
+        remaining = [r[0] for r in con.execute("""
+            SELECT p.cnpj FROM poi_full p
+            WHERE NOT EXISTS (SELECT 1 FROM matched_cnpjs m WHERE m.cnpj = p.cnpj)
+        """).fetchall()]
     else:
         remaining = [r[0] for r in con.execute(
             "SELECT cnpj FROM poi_full"
