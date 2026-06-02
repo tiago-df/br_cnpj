@@ -45,6 +45,13 @@ geocoding:
   # if it falls within this radius of the municipality centroid.
   city_center_threshold_m: 500    # metres
 
+  # Checkpointing — how often to flush progress to disk during Phase A
+  # cep_cache_checkpoint:  save CEP cache every N API responses (fast write, ~0.1s)
+  # cep_output_checkpoint: rebuild full geocoded parquet every N responses
+  #   (slower ~5-10s DuckDB join; file is usable between runs at any % complete)
+  cep_cache_checkpoint: 100
+  cep_output_checkpoint: 5000
+
   # Phase C — TomTom Structured Geocode API fallback
   # Requires TOMTOM_API_KEY set in .env. Results cached per dump date.
   # Set tomtom_enabled: false to skip this phase entirely.

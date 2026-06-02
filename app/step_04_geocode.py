@@ -29,14 +29,23 @@ Reads
 
 Writes
 ------
-  data/intermediate/step_04_geocoded_<dump_date>.parquet
+  data/intermediate/step_04_geocoded_<dump_date>.parquet          (full run)
+  data/intermediate/step_04_geocoded_<dump_date>__<slug>.parquet  (filtered run)
     All step_02 columns + lat (DOUBLE) + lon (DOUBLE) + geo_precision (VARCHAR)
+
+Filtering
+---------
+  Pass geocode_categories=["amenity=hospital"] to restrict geocoding to a
+  subset of POIs for testing.  The output is written to a separate file so
+  it never overwrites the full-run result.
 """
 
 import asyncio
 import logging
 import math
 import os
+import re
+import signal
 import time
 from pathlib import Path
 
@@ -51,7 +60,8 @@ from app.config_loader import get_config
 
 log = logging.getLogger(__name__)
 
-GEOCODED_OUT   = "step_04_geocoded_{date}.parquet"
+GEOCODED_OUT      = "step_04_geocoded_{date}.parquet"
+GEOCODED_OUT_FILT = "step_04_geocoded_{date}__{slug}.parquet"
 CEP_CACHE_FILE = "cep_brasilapi.parquet"
 TT_CACHE_FILE  = "tomtom_{date}.parquet"
 MUNI_CACHE_FILE = "municipio_centroids.parquet"
@@ -93,7 +103,7 @@ def _load_municipio_centroids(cache_dir: Path) -> pd.DataFrame:
     cache_path = cache_dir / MUNI_CACHE_FILE
     if cache_path.exists():
         log.info("    Municipality centroids: loading from cache…")
-        return pd.read_parquet(cache_path)
+        return _parquet_read(cache_path)
 
     log.info("    Municipality centroids: downloading via geobr (one-time)…")
     import geobr  # heavy import — only on first run
@@ -105,7 +115,7 @@ def _load_municipio_centroids(cache_dir: Path) -> pd.DataFrame:
         "lat_centro": centroids.y.values,
         "lon_centro": centroids.x.values,
     })
-    df.to_parquet(cache_path, index=False)
+    _parquet_write(df, cache_path)
     log.info("    Cached %d municipality centroids → %s", len(df), MUNI_CACHE_FILE)
     return df
 
@@ -115,53 +125,248 @@ def _load_municipio_centroids(cache_dir: Path) -> pd.DataFrame:
 async def _fetch_cep(
     session: aiohttp.ClientSession,
     cep: str,
-    sem: asyncio.Semaphore,
+    sem: asyncio.Semaphore | None = None,
     retries: int = 3,
 ) -> dict:
+    """Fetch a single CEP from BrasilAPI.
+
+    Returns dict with keys: cep, lat, lon, transient_error.
+    transient_error=True means the result must NOT be cached (network/quota
+    failure) so the CEP is retried on the next run.
+    """
     url = BRASILAPI_URL.format(cep=cep)
-    for attempt in range(retries):
-        try:
-            async with sem:
+    try:
+        for attempt in range(retries):
+            try:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json(content_type=None)
-                        coords = (data.get("location") or {}).get("coordinates") or {}
-                        try:
-                            lat = float(coords["latitude"])  if coords.get("latitude")  else None
-                            lon = float(coords["longitude"]) if coords.get("longitude") else None
-                        except (TypeError, ValueError):
-                            lat, lon = None, None
-                        return {"cep": cep, "lat": lat, "lon": lon}
-                    elif resp.status == 404:
-                        return {"cep": cep, "lat": None, "lon": None}
-                    elif resp.status == 429:
-                        await asyncio.sleep(2.0 ** attempt)
-                    else:
-                        await asyncio.sleep(1.0)
-        except asyncio.TimeoutError:
-            await asyncio.sleep(1.0)
-        except Exception as exc:
-            log.debug("BrasilAPI error for CEP %s (attempt %d): %s", cep, attempt, exc)
-            await asyncio.sleep(1.0)
-    return {"cep": cep, "lat": None, "lon": None}
+                        if resp.status == 200:
+                            data = await resp.json(content_type=None)
+                            coords = (data.get("location") or {}).get("coordinates") or {}
+                            try:
+                                lat = float(coords["latitude"])  if coords.get("latitude")  else None
+                                lon = float(coords["longitude"]) if coords.get("longitude") else None
+                            except (TypeError, ValueError):
+                                lat, lon = None, None
+                            # Valid response (even if no coords) → cache it
+                            return {"cep": cep, "lat": lat, "lon": lon, "transient_error": False}
+                        elif resp.status == 404:
+                            # CEP does not exist → cache as no-coords
+                            return {"cep": cep, "lat": None, "lon": None, "transient_error": False}
+                        elif resp.status == 429:
+                            await asyncio.sleep(2.0 ** attempt)
+                        else:
+                            await asyncio.sleep(1.0)
+            except asyncio.TimeoutError:
+                await asyncio.sleep(1.0)
+            except asyncio.CancelledError:
+                raise   # propagate immediately — don't retry, don't cache
+            except Exception as exc:
+                log.debug("BrasilAPI error for CEP %s (attempt %d): %s", cep, attempt, exc)
+                await asyncio.sleep(1.0)
+    except asyncio.CancelledError:
+        # Task was cancelled (e.g. Ctrl+C) — return as transient so it's not cached
+        return {"cep": cep, "lat": None, "lon": None, "transient_error": True}
+    # All retries exhausted due to network/server error → do NOT cache
+    log.debug("BrasilAPI: transient error for CEP %s — will retry next run", cep)
+    return {"cep": cep, "lat": None, "lon": None, "transient_error": True}
 
 
-async def _fetch_all_ceps(ceps: list[str], workers: int) -> list[dict]:
-    sem = asyncio.Semaphore(workers)
-    connector = aiohttp.TCPConnector(limit=workers, ssl=False)
-    async with aiohttp.ClientSession(connector=connector) as session:
-        tasks = [_fetch_cep(session, cep, sem) for cep in ceps]
+# Module-level stop flag — set by SIGINT handler, checked by all workers.
+# Using a module-level variable avoids any Python closure-capture subtleties.
+_STOP_REQUESTED: bool = False
+
+
+def _run_async(coro_factory) -> list:
+    """Run an async coroutine with a SIGINT handler that sets a stop flag.
+
+    Workers check the flag before each new request and exit cleanly after
+    finishing their current in-flight request (≤10 s).  No task cancellation
+    is needed, so there is no asyncio cleanup hang.
+    """
+    global _STOP_REQUESTED
+    _STOP_REQUESTED = False
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    def _sigint_handler(sig, frame):
+        global _STOP_REQUESTED
+        log.warning("    Interrupted — finishing in-flight requests and saving cache…")
+        _STOP_REQUESTED = True
+
+    old_handler = signal.signal(signal.SIGINT, _sigint_handler)
+    try:
+        return loop.run_until_complete(coro_factory)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        _STOP_REQUESTED = True
+        return []
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
+        loop.close()
+
+
+def _parquet_write(df: pd.DataFrame, path: Path) -> None:
+    """Write DataFrame to Parquet using DuckDB (no pyarrow dependency)."""
+    con = duckdb.connect()
+    con.register("_df", df)
+    con.execute(f"COPY _df TO '{path}' (FORMAT PARQUET, COMPRESSION 'zstd')")
+    con.close()
+
+
+def _parquet_read(path: Path) -> pd.DataFrame:
+    """Read Parquet using DuckDB (no pyarrow dependency)."""
+    con = duckdb.connect()
+    df = con.execute(f"SELECT * FROM read_parquet('{path}')").df()
+    con.close()
+    return df
+
+
+def _write_partial_output(
+    cache_df: pd.DataFrame,
+    joined_path: Path,
+    geocoded_out: Path,
+    compression: str,
+    row_group: int,
+) -> None:
+    """Join current CEP cache with full POI table and write partial geocoded output.
+
+    Records not yet in cache get lat=NULL, lon=NULL, geo_precision='pending'.
+    This makes the output file usable at any point during the fetch phase.
+    """
+    con = duckdb.connect()
+    con.register("cep_cache", cache_df)
+    con.execute(f"""
+        COPY (
+            SELECT
+                p.*,
+                g.lat,
+                g.lon,
+                CASE
+                    WHEN g.lat IS NOT NULL THEN 'cep'
+                    WHEN g.cep IS NOT NULL THEN 'none'
+                    ELSE 'pending'
+                END AS geo_precision
+            FROM read_parquet('{joined_path}') p
+            LEFT JOIN (
+                SELECT
+                    lpad(regexp_replace(cep, '[^0-9]', '', 'g'), 8, '0') AS cep_clean,
+                    lat, lon, cep
+                FROM cep_cache
+            ) g ON lpad(regexp_replace(p.cep, '[^0-9]', '', 'g'), 8, '0') = g.cep_clean
+        ) TO '{geocoded_out}'
+        (FORMAT PARQUET, COMPRESSION '{compression}', ROW_GROUP_SIZE {row_group})
+    """)
+    con.close()
+
+
+async def _fetch_all_ceps(
+    ceps: list[str],
+    workers: int,
+    cache_path: Path,
+    joined_path: Path,
+    geocoded_out: Path,
+    compression: str,
+    row_group: int,
+    cache_checkpoint: int = 100,
+    output_checkpoint: int = 5_000,
+) -> list[dict]:
+    """Fetch CEPs with a fixed worker-pool (asyncio.Queue + N coroutines).
+
+    Graceful shutdown: when stop_flag is set (Ctrl+C), each worker finishes
+    its current in-flight request (≤10 s) then exits — no task cancellation,
+    no asyncio cleanup hang.
+    """
+    # Resume from existing cache
+    if cache_path.exists():
+        existing     = _parquet_read(cache_path)
+        already_done = {r["cep"] for r in existing.to_dict("records")}
+        results: list[dict] = existing.to_dict("records")
+    else:
+        already_done: set = set()
         results = []
-        for coro in atqdm(asyncio.as_completed(tasks), total=len(tasks), desc="  BrasilAPI CEP"):
-            results.append(await coro)
+
+    remaining = [c for c in ceps if c not in already_done]
+    if not remaining:
+        return results
+
+    queue: asyncio.Queue = asyncio.Queue()
+    for cep in remaining:
+        queue.put_nowait(cep)
+
+    since_cache_save   = 0
+    since_output_write = 0
+    pbar = atqdm(total=len(ceps), desc="  BrasilAPI CEP",
+                 initial=len(already_done))
+
+    connector = aiohttp.TCPConnector(limit=workers, ssl=False)
+
+    async def _worker(session: aiohttp.ClientSession) -> None:
+        nonlocal since_cache_save, since_output_write
+        while not _STOP_REQUESTED:
+            try:
+                cep = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+            row = await _fetch_cep(session, cep)
+            pbar.update(1)
+
+            if not row.get("transient_error"):
+                results.append({"cep": row["cep"], "lat": row["lat"], "lon": row["lon"]})
+                since_cache_save   += 1
+                since_output_write += 1
+
+            # ── Cache checkpoint ──────────────────────────────────────────
+            if since_cache_save >= cache_checkpoint:
+                df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+                _parquet_write(df, cache_path)
+                since_cache_save = 0
+
+            # ── Output checkpoint ─────────────────────────────────────────
+            if since_output_write >= output_checkpoint:
+                df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+                if since_cache_save > 0:
+                    _parquet_write(df, cache_path)
+                    since_cache_save = 0
+                log.info("    Checkpoint: rebuilding output (%d/%d CEPs)…",
+                         len(results), len(ceps))
+                _write_partial_output(df, joined_path, geocoded_out,
+                                      compression, row_group)
+                since_output_write = 0
+
+    try:
+        async with aiohttp.ClientSession(connector=connector) as session:
+            worker_tasks = [
+                asyncio.create_task(_worker(session)) for _ in range(workers)
+            ]
+            await asyncio.gather(*worker_tasks, return_exceptions=True)
+    finally:
+        pbar.close()
+        # Always flush — clean finish, Ctrl+C, or exception
+        if results:
+            df = pd.DataFrame(results, columns=["cep", "lat", "lon"])
+            _parquet_write(df, cache_path)
+            log.info("    Cache saved: %d entries", len(df))
+
     return results
 
 
-def _geocode_ceps(unique_ceps: list[str], cache_dir: Path, workers: int) -> pd.DataFrame:
-    """Return DataFrame {cep, lat, lon} for all unique_ceps.  Uses/updates local cache."""
+def _geocode_ceps(
+    unique_ceps: list[str],
+    cache_dir: Path,
+    workers: int,
+    joined_path: Path,
+    geocoded_out: Path,
+    compression: str,
+    row_group: int,
+    cache_checkpoint: int = 100,
+    output_checkpoint: int = 5_000,
+) -> pd.DataFrame:
+    """Return DataFrame {cep, lat, lon} for all unique_ceps. Uses/updates local cache."""
     cache_path = cache_dir / CEP_CACHE_FILE
+
     if cache_path.exists():
-        cached = pd.read_parquet(cache_path)
+        cached = _parquet_read(cache_path)
         known  = set(cached["cep"].tolist())
     else:
         cached = pd.DataFrame(columns=["cep", "lat", "lon"])
@@ -169,11 +374,18 @@ def _geocode_ceps(unique_ceps: list[str], cache_dir: Path, workers: int) -> pd.D
 
     to_fetch = [c for c in unique_ceps if c not in known]
     if to_fetch:
-        log.info("    Fetching %d new CEPs (workers=%d)…", len(to_fetch), workers)
-        new_rows = asyncio.run(_fetch_all_ceps(to_fetch, workers))
-        new_df   = pd.DataFrame(new_rows, columns=["cep", "lat", "lon"])
-        combined = pd.concat([cached, new_df], ignore_index=True)
-        combined.to_parquet(cache_path, index=False)
+        log.info(
+            "    Fetching %d new CEPs (workers=%d, cache every %d, output every %d)…",
+            len(to_fetch), workers, cache_checkpoint, output_checkpoint,
+        )
+        all_rows = _run_async(
+            _fetch_all_ceps(
+                unique_ceps, workers, cache_path,
+                joined_path, geocoded_out, compression, row_group,
+                cache_checkpoint, output_checkpoint,
+            ),
+        )
+        combined = pd.DataFrame(all_rows, columns=["cep", "lat", "lon"]) if all_rows else _parquet_read(cache_path)
         log.info("    CEP cache: %d total entries", len(combined))
     else:
         combined = cached
@@ -184,6 +396,8 @@ def _geocode_ceps(unique_ceps: list[str], cache_dir: Path, workers: int) -> pd.D
 
 # ── Phase C: TomTom structured geocoding ─────────────────────────────────────
 
+_TT_TRANSIENT = {"failed", "error"}   # geo_precision values that must NOT be cached
+
 async def _fetch_tomtom(
     session: aiohttp.ClientSession,
     row: dict,
@@ -191,6 +405,13 @@ async def _fetch_tomtom(
     sem: asyncio.Semaphore,
     retries: int = 3,
 ) -> dict:
+    """Fetch structured geocode from TomTom.
+
+    geo_precision values:
+      tomtom_*           → valid result, cache it
+      none               → API returned 200 but no results, cache it (won't improve)
+      failed / error     → transient failure, do NOT cache (retry next run)
+    """
     cnpj = row["cnpj"]
     params: dict = {
         "key":         api_key,
@@ -272,7 +493,7 @@ def _geocode_tomtom(
     """Return DataFrame {cnpj, lat, lon, geo_precision} for fallback records."""
     cache_path = cache_dir / TT_CACHE_FILE.format(date=dump_date)
     if cache_path.exists():
-        cached     = pd.read_parquet(cache_path)
+        cached     = _parquet_read(cache_path)
         known_cnpj = set(cached["cnpj"].tolist())
     else:
         cached     = pd.DataFrame(columns=["cnpj", "lat", "lon", "geo_precision"])
@@ -288,18 +509,36 @@ def _geocode_tomtom(
     rows = to_fetch[[c for c in needed_cols if c in to_fetch.columns]].to_dict("records")
     log.info("    TomTom: fetching %d records (workers=%d)…", len(rows), workers)
 
-    new_results = asyncio.run(_fetch_all_tomtom(rows, api_key, workers))
-    new_df      = pd.DataFrame(new_results)
-    combined    = pd.concat([cached, new_df], ignore_index=True)
-    combined.to_parquet(cache_path, index=False)
+    new_results = _run_async(_fetch_all_tomtom(rows, api_key, workers))
+    # Exclude transient errors from cache so they are retried next run
+    cacheable   = [r for r in new_results if r.get("geo_precision") not in _TT_TRANSIENT]
+    transient_n = len(new_results) - len(cacheable)
+    if transient_n:
+        log.warning("    TomTom: %d transient errors excluded from cache — will retry next run",
+                    transient_n)
+    new_df   = pd.DataFrame(cacheable) if cacheable else pd.DataFrame(
+        columns=["cnpj", "lat", "lon", "geo_precision"])
+    combined = pd.concat([cached, new_df], ignore_index=True)
+    _parquet_write(combined, cache_path)
     log.info("    TomTom cache: %d total entries", len(combined))
     return combined[combined["cnpj"].isin(set(df_fallback["cnpj"].tolist()))].copy()
 
 
 # ── Step entry point ─────────────────────────────────────────────────────────
 
-def output_exists(intermediate_dir: Path, dump_date: str) -> bool:
-    return (intermediate_dir / GEOCODED_OUT.format(date=dump_date)).exists()
+def _category_slug(categories: list[str]) -> str:
+    """Turn ['amenity=hospital', 'amenity=clinic'] into 'amenity=hospital_amenity=clinic'."""
+    return "_".join(re.sub(r"[^\w=]", "-", c) for c in sorted(categories))
+
+
+def output_exists(intermediate_dir: Path, dump_date: str,
+                  geocode_categories: list[str] | None = None) -> bool:
+    fname = (
+        GEOCODED_OUT_FILT.format(date=dump_date, slug=_category_slug(geocode_categories))
+        if geocode_categories
+        else GEOCODED_OUT.format(date=dump_date)
+    )
+    return (intermediate_dir / fname).exists()
 
 
 def run(
@@ -307,9 +546,15 @@ def run(
     cache_dir: Path,
     dump_date: str,
     force: bool = False,
+    geocode_categories: list[str] | None = None,
 ) -> Path:
     """Geocode POIs from step_02 → enriched Parquet with lat/lon.  Returns output path."""
-    geocoded_out = intermediate_dir / GEOCODED_OUT.format(date=dump_date)
+    if geocode_categories:
+        slug = _category_slug(geocode_categories)
+        geocoded_out = intermediate_dir / GEOCODED_OUT_FILT.format(date=dump_date, slug=slug)
+        log.info("  Filtered geocoding — categories: %s", geocode_categories)
+    else:
+        geocoded_out = intermediate_dir / GEOCODED_OUT.format(date=dump_date)
 
     if not force and geocoded_out.exists():
         log.info("Step 4 already done — skipping (use --force to reprocess)")
@@ -322,10 +567,12 @@ def run(
 
     cfg       = get_config()
     geo_cfg   = cfg.get("geocoding", {})
-    cep_workers  = int(geo_cfg.get("cep_workers", 20))
-    tt_workers   = int(geo_cfg.get("tomtom_workers", 10))
-    city_thresh  = float(geo_cfg.get("city_center_threshold_m", 500))
-    tt_enabled   = bool(geo_cfg.get("tomtom_enabled", True))
+    cep_workers       = int(geo_cfg.get("cep_workers", 20))
+    tt_workers        = int(geo_cfg.get("tomtom_workers", 10))
+    city_thresh       = float(geo_cfg.get("city_center_threshold_m", 500))
+    tt_enabled        = bool(geo_cfg.get("tomtom_enabled", True))
+    cache_checkpoint  = int(geo_cfg.get("cep_cache_checkpoint", 100))
+    output_checkpoint = int(geo_cfg.get("cep_output_checkpoint", 5_000))
     compression  = cfg["output"]["parquet_compression"]
     row_group    = cfg["output"]["parquet_row_group_size"]
 
@@ -338,17 +585,24 @@ def run(
     t0 = time.perf_counter()
     log.info("Step 4 — Geocoding POIs…")
 
-    # ── Load lightweight subset of POI table ────────────────────────────────
+    # ── Load address fields (optionally filtered by osm_category) ────────────
     log.info("  Loading address fields from step_02 output…")
     con = duckdb.connect(":memory:")
+    if geocode_categories:
+        cat_list = ", ".join(f"'{c}'" for c in geocode_categories)
+        where    = f"WHERE osm_category IN ({cat_list})"
+    else:
+        where = ""
     df = con.execute(f"""
         SELECT cnpj, tipo_logradouro, logradouro, numero,
                bairro, cep, municipio, municipio_descricao, uf
         FROM '{joined_path}'
+        {where}
     """).df()
     con.close()
     n_total = len(df)
-    log.info("  %s POIs loaded", f"{n_total:,}")
+    log.info("  %s POIs loaded%s", f"{n_total:,}",
+             f" (category filter: {geocode_categories})" if geocode_categories else "")
 
     # Normalise CEP: digits only, zero-padded to 8
     df["cep_clean"] = (
@@ -363,12 +617,24 @@ def run(
 
     # ── Phase A: BrasilAPI CEP lookup ────────────────────────────────────────
     log.info("Step 4 — Phase A: BrasilAPI CEP geocoding…")
-    cep_df = _geocode_ceps(unique_ceps, cache_dir, cep_workers)
+    cep_df = _geocode_ceps(
+        unique_ceps, cache_dir, cep_workers,
+        joined_path=joined_path,
+        geocoded_out=geocoded_out,
+        compression=compression,
+        row_group=row_group,
+        cache_checkpoint=cache_checkpoint,
+        output_checkpoint=output_checkpoint,
+    )
 
     df = df.merge(
         cep_df[["cep", "lat", "lon"]].rename(columns={"cep": "cep_clean"}),
         on="cep_clean", how="left",
     )
+
+    # Ensure lat/lon are float64 regardless of whether the merge produced object dtype
+    df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
+    df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
 
     cep_found = df["lat"].notna().sum()
     log.info(
@@ -436,8 +702,8 @@ def run(
                     on="cnpj", how="left",
                 )
                 update_mask = fallback_mask & df["lat_tt"].notna()
-                df.loc[update_mask, "lat"]           = df.loc[update_mask, "lat_tt"]
-                df.loc[update_mask, "lon"]           = df.loc[update_mask, "lon_tt"]
+                df.loc[update_mask, "lat"]           = pd.to_numeric(df.loc[update_mask, "lat_tt"], errors="coerce")
+                df.loc[update_mask, "lon"]           = pd.to_numeric(df.loc[update_mask, "lon_tt"], errors="coerce")
                 df.loc[update_mask, "geo_precision"] = df.loc[update_mask, "prec_tt"]
                 df.drop(columns=["lat_tt", "lon_tt", "prec_tt"], errors="ignore", inplace=True)
 
@@ -454,9 +720,15 @@ def run(
     for prec, cnt in df["geo_precision"].value_counts().items():
         log.info("    %-32s %s  (%.1f%%)", prec, f"{cnt:,}", 100.0 * cnt / n_total)
 
-    # ── Write output: merge geo columns into full POI table ──────────────────
+    # ── Write output: merge geo columns into POI table ───────────────────────
     log.info("Step 4 — Writing output…")
     geo_cols = df[["cnpj", "lat", "lon", "geo_precision"]].copy()
+
+    if geocode_categories:
+        cat_list  = ", ".join(f"'{c}'" for c in geocode_categories)
+        poi_where = f"WHERE p.osm_category IN ({cat_list})"
+    else:
+        poi_where = ""
 
     con2 = duckdb.connect(":memory:")
     con2.register("geo_cols", geo_cols)
@@ -465,6 +737,7 @@ def run(
             SELECT p.*, g.lat, g.lon, g.geo_precision
             FROM '{joined_path}' p
             LEFT JOIN geo_cols g USING (cnpj)
+            {poi_where}
         ) TO '{geocoded_out}'
         (FORMAT PARQUET, COMPRESSION '{compression}', ROW_GROUP_SIZE {row_group})
     """)

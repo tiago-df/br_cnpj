@@ -60,6 +60,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--uf",   nargs="+", metavar="UF")
     parser.add_argument("--cnae", nargs="+", metavar="CODE")
+    parser.add_argument(
+        "--geocode-category", nargs="+", metavar="TAG",
+        dest="geocode_category",
+        help=(
+            "Geocode only POIs matching these OSM categories (for testing). "
+            "E.g.: --geocode-category 'amenity=hospital' 'amenity=clinic'. "
+            "Output is written to a separate file and does not overwrite the full run."
+        ),
+    )
     parser.add_argument("--force", action="store_true",
                         help="Reprocess all steps even if intermediates exist")
     parser.add_argument("--count", action="store_true",
@@ -101,6 +110,8 @@ def main():
         log.info("UF filter : %s", args.uf)
     if args.cnae:
         log.info("CNAE filter: %s", args.cnae)
+    if args.geocode_category:
+        log.info("Geocode cat: %s", args.geocode_category)
     log.info("Force     : %s", args.force)
     log.info("=" * 60)
 
@@ -157,6 +168,7 @@ def main():
                 cache_dir=cache_dir,
                 dump_date=dump_date,
                 force=args.force,
+                geocode_categories=args.geocode_category or None,
             )
 
         # ── Step 4: Export ────────────────────────────────────────────────
