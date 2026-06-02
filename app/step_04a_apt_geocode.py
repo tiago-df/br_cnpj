@@ -356,11 +356,16 @@ def run(
 
     # ── Pre-process GeoPackages ───────────────────────────────────────────────
     apt_index_paths = [_build_apt_index(g, cache_dir) for g in gpkg_paths]
-    apt_glob = (
-        str(apt_index_paths[0])
-        if len(apt_index_paths) == 1
-        else "[" + ", ".join(f"'{p}'" for p in apt_index_paths) + "]"
-    )
+    # Build SQL fragment for read_parquet():
+    #   single file  → 'path/to/file.parquet'
+    #   multiple     → ['path/file1.parquet', 'path/file2.parquet']
+    # The list form must NOT be wrapped in outer quotes — DuckDB parses it
+    # as a native array, not a string. Wrapping caused BinderException on
+    # the '/' character being misread as a division operator.
+    if len(apt_index_paths) == 1:
+        apt_glob = f"'{apt_index_paths[0]}'"
+    else:
+        apt_glob = "[" + ", ".join(f"'{p}'" for p in apt_index_paths) + "]"
 
     # ── Load checkpoint (resume support) ─────────────────────────────────────
     matched: dict[str, tuple] = {} if force else _load_checkpoint(chk_path)
@@ -375,7 +380,7 @@ def run(
     # Load APT into memory (stays for the session)
     log.info("  Loading APT index into memory…")
     t0 = time.perf_counter()
-    con.execute(f"CREATE OR REPLACE TABLE apt AS SELECT * FROM read_parquet('{apt_glob}')")
+    con.execute(f"CREATE OR REPLACE TABLE apt AS SELECT * FROM read_parquet({apt_glob})")
     n_apt = con.execute("SELECT count(*) FROM apt").fetchone()[0]
     log.info("  APT: %s rows loaded in %.1f s", f"{n_apt:,}", time.perf_counter() - t0)
 
